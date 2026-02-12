@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.util.Log
+import android.view.MenuItem
 import android.view.View
 import android.widget.ImageButton
 import android.widget.TextView
@@ -71,11 +72,18 @@ class MainActivity : AppCompatActivity() {
             when (item.itemId) {
                 R.id.action_favorite -> {
                     selectedFiles.forEach { model ->
-                        if (model.isDirectory && !favoritePaths.contains(model.path)) {
-                            favoritePaths.add(model.path)
+                        if (model.isDirectory) {
+                            // Παίρνουμε μόνο το όνομα του φακέλου για ετικέτα (π.χ. "Documents")
+                            val folderName = File(model.path).name
+                            val entryToSave = "$folderName*${model.path}"
+
+                            // Έλεγχος αν υπάρχει ήδη (συγκρίνοντας το path μέρος)
+                            if (!favoritePaths.any { it.endsWith("*${model.path}") }) {
+                                favoritePaths.add(entryToSave)
+                            }
                         }
                     }
-                    saveFavorites() // Δημιούργησε μια συνάρτηση save για ευκολία
+                    saveFavorites()
                     updateDrawerMenu()
                     exitSelectionMode()
                     true
@@ -142,6 +150,13 @@ class MainActivity : AppCompatActivity() {
         updateDrawerMenu()       // Σχεδιασμός μενού
         setupDrawerDragAndDrop() // Ενεργοποίηση Drag & Drop
         loadFiles(currentPath)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Αυτό εκτελείται κάθε φορά που επιστρέφεις στην εφαρμογή ή κλείνεις την FtpActivity
+        loadFavoritesFromPrefs()
+        updateDrawerMenu()
     }
 
     private fun checkPermissions() {
@@ -643,41 +658,76 @@ class MainActivity : AppCompatActivity() {
         val favoriteSubMenu = favoriteItem.subMenu!!
         favoriteSubMenu.clear()
 
-        favoritePaths.forEachIndexed { index, path ->
-            // ΕΛΕΓΧΟΣ: Είναι FTP ή Τοπικό;
-            val isFtp = path.startsWith("ftp://")
-            val displayName = if (isFtp) path.replace("ftp://", "") else File(path).name
+        favoritePaths.forEachIndexed { index, entry ->
+            // Χωρίζουμε το Alias από το Path (μορφή: "Το Όνομά Μου*ftp://host")
+            val parts = entry.split("*")
+            val (displayName, realPath) = if (parts.size > 1) {
+                parts[0] to parts[1]
+            } else {
+                // Αν είναι παλιό αγαπημένο χωρίς αστερίσκο
+                val name = if (entry.startsWith("ftp://")) entry.replace("ftp://", "") else File(entry).name
+                name to entry
+            }
 
             val menuItem = favoriteSubMenu.add(0, index, index, displayName)
+            menuItem.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
 
-            // Αλλαγή εικονιδίου αν είναι FTP
-            if (isFtp) {
-                menuItem.setIcon(android.R.drawable.ic_menu_share) // Εικονίδιο δικτύου/διαμοιρασμού
+            // Εικονίδιο ανάλογα με το REAL path
+            if (realPath.startsWith("ftp://")) {
+                menuItem.setIcon(android.R.drawable.ic_menu_share)
             } else {
-                menuItem.setIcon(android.R.drawable.ic_dialog_map) // Εικονίδιο φακέλου
+                menuItem.setIcon(android.R.drawable.ic_dialog_map)
             }
 
             menuItem.setActionView(R.layout.menu_item_favorite)
             val actionView = menuItem.actionView
 
+            actionView?.findViewById<ImageButton>(R.id.btnRenameFavorite)?.setOnClickListener {
+                showRenameFavoriteDialog(entry, index)
+            }
+
             actionView?.findViewById<ImageButton>(R.id.btnRemoveFavorite)?.setOnClickListener {
-                showRemoveFavoriteDialog(path)
+                showRemoveFavoriteDialog(entry)
             }
 
             menuItem.setOnMenuItemClickListener {
-                if (isFtp) {
-                    // ΑΝ ΕΙΝΑΙ FTP: Άνοιγμα της FtpActivity
+                if (realPath.startsWith("ftp://")) {
+                    val host = realPath.replace("ftp://", "")
                     val intent = Intent(this, FtpActivity::class.java)
-                    intent.putExtra("TARGET_HOST", displayName) // Στέλνουμε το host
+                    intent.putExtra("TARGET_HOST", host)
                     startActivity(intent)
                 } else {
-                    // ΑΝ ΕΙΝΑΙ ΤΟΠΙΚΟ: Φόρτωση αρχείων όπως πριν
-                    loadFiles(File(path))
+                    loadFiles(File(realPath))
                 }
                 binding.drawerLayout.closeDrawers()
                 true
             }
         }
+    }
+
+    private fun showRenameFavoriteDialog(oldEntry: String, index: Int) {
+        val parts = oldEntry.split("*")
+        val currentAlias = parts[0]
+        val realPath = if (parts.size > 1) parts[1] else parts[0]
+
+        val input = android.widget.EditText(this)
+        input.setText(currentAlias)
+
+        AlertDialog.Builder(this)
+            .setTitle("Μετονομασία Ετικέτας")
+            .setMessage("Δώστε ένα όνομα για αυτό το αγαπημένο:")
+            .setView(input)
+            .setPositiveButton("Αποθήκευση") { _, _ ->
+                val newAlias = input.text.toString()
+                if (newAlias.isNotEmpty()) {
+                    // Αποθηκεύουμε ως "ΝέοΌνομα*ΠραγματικόPath"
+                    favoritePaths[index] = "$newAlias*$realPath"
+                    saveFavorites()
+                    updateDrawerMenu()
+                }
+            }
+            .setNegativeButton("Άκυρο", null)
+            .show()
     }
 
     private fun saveFavorites() {
@@ -690,20 +740,14 @@ class MainActivity : AppCompatActivity() {
             .apply()
     }
 
-    private fun showRemoveFavoriteDialog(path: String) {
+    private fun showRemoveFavoriteDialog(entry: String) {
+        val displayName = entry.split("*")[0] // Παίρνουμε μόνο το πρώτο μέρος
         AlertDialog.Builder(this)
             .setTitle("Αφαίρεση από τα Αγαπημένα;")
-            .setMessage("Θέλετε να αφαιρέσετε τον φάκελο ${File(path).name} από τη λίστα;")
+            .setMessage("Θέλετε να αφαιρέσετε το '$displayName' από τη λίστα;")
             .setPositiveButton("Αφαίρεση") { _, _ ->
-                // 1. Αφαίρεση από τη λίστα στη μνήμη
-                favoritePaths.remove(path)
-
-                // 2. Αποθήκευση της λίστας ως String για να διατηρηθεί η σειρά
-                val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
-                val orderedString = favoritePaths.joinToString("|")
-                prefs.edit().putString("paths_ordered", orderedString).apply()
-
-                // 3. Ενημέρωση του μενού
+                favoritePaths.remove(entry)
+                saveFavorites()
                 updateDrawerMenu()
                 Toast.makeText(this, "Αφαιρέθηκε", Toast.LENGTH_SHORT).show()
             }

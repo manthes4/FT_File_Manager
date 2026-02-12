@@ -255,7 +255,15 @@ class FtpActivity : AppCompatActivity() {
                 val favoritePaths = if (savedPaths.isNullOrEmpty()) mutableListOf<String>()
                 else savedPaths.split("|").toMutableList()
 
+                // Μέσα στην askToSaveFavorite της FtpActivity
                 val ftpPath = "ftp://$host"
+                val entryToSave = "$host*$ftpPath" // Το όνομα θα είναι το host, και το path το ftp://host
+
+                if (!favoritePaths.any { it.endsWith("*$ftpPath") }) {
+                    favoritePaths.add(entryToSave)
+                    // Σώζουμε στα prefs "favorites" με κλειδί "paths_ordered"
+                    prefs.edit().putString("paths_ordered", favoritePaths.joinToString("|")).apply()
+                }
 
                 if (!favoritePaths.contains(ftpPath)) {
                     favoritePaths.add(ftpPath)
