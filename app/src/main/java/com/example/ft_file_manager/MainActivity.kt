@@ -28,11 +28,16 @@ class MainActivity : AppCompatActivity() {
     private var isSelectionMode = false // Αυτή η γραμμή έλειπε!
     private var bulkFilesToMove = listOf<FileModel>() // Νέα μεταβλητή στην κορυφή της κλάσης!
 
+    private val favoritePaths = mutableSetOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
+        favoritePaths.addAll(prefs.getStringSet("paths", emptySet()) ?: emptySet())
+        updateDrawerMenu()
 
         binding.recyclerView.layoutManager = LinearLayoutManager(this)
 
@@ -41,27 +46,38 @@ class MainActivity : AppCompatActivity() {
             binding.drawerLayout.openDrawer(GravityCompat.START)
         }
 
-        // 2. Toolbar Menu Items (Delete, Copy, κλπ)
         binding.toolbar.setOnMenuItemClickListener { item ->
             val selectedFiles = fullFileList.filter { it.isSelected }
+
             when (item.itemId) {
-                R.id.action_delete -> {
-                    confirmBulkDelete(selectedFiles); true
+                R.id.action_favorite -> {
+                    // Δουλεύει μόνο για φακέλους
+                    val directories = selectedFiles.filter { it.isDirectory }
+                    if (directories.isEmpty()) {
+                        Toast.makeText(this, "Μόνο οι φάκελοι μπαίνουν στα Αγαπημένα", Toast.LENGTH_SHORT).show()
+                    } else {
+                        directories.forEach { favoritePaths.add(it.path) }
+
+                        // Αποθήκευση
+                        getSharedPreferences("favorites", MODE_PRIVATE)
+                            .edit()
+                            .putStringSet("paths", favoritePaths)
+                            .apply()
+
+                        updateDrawerMenu()
+                        exitSelectionMode()
+                        Toast.makeText(this, "Προστέθηκε στα Αγαπημένα", Toast.LENGTH_SHORT).show()
+                    }
+                    true
                 }
 
-                R.id.action_copy -> {
-                    startBulkMove(selectedFiles, isCut = false); true
-                }
-
-                R.id.action_cut -> {
-                    startBulkMove(selectedFiles, isCut = true); true
-                }
-
+                R.id.action_delete -> { confirmBulkDelete(selectedFiles); true }
+                R.id.action_copy   -> { startBulkMove(selectedFiles, isCut = false); true }
+                R.id.action_cut    -> { startBulkMove(selectedFiles, isCut = true); true }
                 R.id.action_rename -> {
                     if (selectedFiles.size == 1) showRenameDialog(selectedFiles[0])
                     true
                 }
-
                 else -> false
             }
         }
@@ -591,6 +607,51 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
+            }
+            .setNegativeButton("Άκυρο", null)
+            .show()
+    }
+
+    private fun updateDrawerMenu() {
+        val menu = binding.navigationView.menu
+
+        // Αναζήτηση του item που περιέχει το SubMenu
+        val favoriteItem = menu.findItem(R.id.nav_favorites_group)
+        val favoriteSubMenu = favoriteItem?.subMenu ?:
+        menu.addSubMenu(0, R.id.nav_favorites_group, 100, "Αγαπημένα")
+
+        favoriteSubMenu.clear()
+
+        favoritePaths.forEach { path ->
+            val file = File(path)
+            val menuItem = favoriteSubMenu.add(file.name)
+            menuItem.setIcon(android.R.drawable.btn_star_big_on)
+
+            menuItem.setOnMenuItemClickListener {
+                // Αν ο χρήστης είναι ήδη στον φάκελο, ρωτάμε για αφαίρεση
+                if (currentPath.absolutePath == path) {
+                    showRemoveFavoriteDialog(path)
+                } else {
+                    loadFiles(file)
+                    binding.drawerLayout.closeDrawers()
+                }
+                true
+            }
+        }
+    }
+
+    private fun showRemoveFavoriteDialog(path: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Αφαίρεση από τα Αγαπημένα;")
+            .setMessage("Θέλετε να αφαιρέσετε τον φάκελο ${File(path).name} από τη λίστα;")
+            .setPositiveButton("Αφαίρεση") { _, _ ->
+                favoritePaths.remove(path)
+                getSharedPreferences("favorites", MODE_PRIVATE)
+                    .edit()
+                    .putStringSet("paths", favoritePaths)
+                    .apply()
+                updateDrawerMenu()
+                Toast.makeText(this, "Αφαιρέθηκε", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Άκυρο", null)
             .show()

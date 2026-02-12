@@ -4,13 +4,13 @@
     <item
         android:id="@+id/action_copy"
         android:title="Copy"
-        android:icon="@android:drawable/ic_menu_share"
+        android:icon="@drawable/file_copy_24px"
         app:showAsAction="always" />
 
     <item
         android:id="@+id/action_cut"
         android:title="Cut"
-        android:icon="@android:drawable/ic_menu_send"
+        android:icon="@drawable/content_cut_24px"
         app:showAsAction="always" />
 
     <item
@@ -18,6 +18,12 @@
         android:title="Delete"
         android:icon="@android:drawable/ic_delete"
         app:showAsAction="always" />
+
+    <item
+        android:id="@+id/action_favorite"
+        android:title="Favorites"
+        android:icon="@android:drawable/btn_star_big_on"
+        app:showAsAction="ifRoom" />
 
     <item
         android:id="@+id/action_rename"
