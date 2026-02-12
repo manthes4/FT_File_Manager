@@ -5,7 +5,9 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.util.Log
 import android.view.View
+import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -13,11 +15,14 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.core.view.GravityCompat
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.example.ft_file_manager.databinding.ActivityMainBinding
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import java.io.File
 import kotlinx.coroutines.*
+import java.util.Collections
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -28,15 +33,29 @@ class MainActivity : AppCompatActivity() {
     private var isSelectionMode = false // Αυτή η γραμμή έλειπε!
     private var bulkFilesToMove = listOf<FileModel>() // Νέα μεταβλητή στην κορυφή της κλάσης!
 
-    private val favoritePaths = mutableSetOf<String>()
+    // Αντί για MutableSet, χρησιμοποιούμε MutableList για να έχουμε σειρά (index)
+    private var favoritePaths = mutableListOf<String>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Μέσα στο onCreate
         val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
-        favoritePaths.addAll(prefs.getStringSet("paths", emptySet()) ?: emptySet())
+        val savedPaths = prefs.getString("paths_ordered", "")
+        if (!savedPaths.isNullOrEmpty()) {
+            // Καθαρίζουμε τη λίστα και προσθέτουμε τα στοιχεία από το String με τη σωστή σειρά
+            favoritePaths.clear()
+            favoritePaths.addAll(savedPaths.split("|"))
+        } else {
+            // Fallback: Αν υπάρχουν παλιά δεδομένα από το Set (πριν τη μετατροπή)
+            val oldSet = prefs.getStringSet("paths", emptySet()) ?: emptySet()
+            if (oldSet.isNotEmpty()) {
+                favoritePaths.addAll(oldSet)
+                saveFavorites() // Τα σώζουμε αμέσως στη νέα μορφή String
+            }
+        }
         updateDrawerMenu()
 
         binding.recyclerView.layoutManager = LinearLayoutManager(this)
@@ -51,33 +70,34 @@ class MainActivity : AppCompatActivity() {
 
             when (item.itemId) {
                 R.id.action_favorite -> {
-                    // Δουλεύει μόνο για φακέλους
-                    val directories = selectedFiles.filter { it.isDirectory }
-                    if (directories.isEmpty()) {
-                        Toast.makeText(this, "Μόνο οι φάκελοι μπαίνουν στα Αγαπημένα", Toast.LENGTH_SHORT).show()
-                    } else {
-                        directories.forEach { favoritePaths.add(it.path) }
-
-                        // Αποθήκευση
-                        getSharedPreferences("favorites", MODE_PRIVATE)
-                            .edit()
-                            .putStringSet("paths", favoritePaths)
-                            .apply()
-
-                        updateDrawerMenu()
-                        exitSelectionMode()
-                        Toast.makeText(this, "Προστέθηκε στα Αγαπημένα", Toast.LENGTH_SHORT).show()
+                    selectedFiles.forEach { model ->
+                        if (model.isDirectory && !favoritePaths.contains(model.path)) {
+                            favoritePaths.add(model.path)
+                        }
                     }
+                    saveFavorites() // Δημιούργησε μια συνάρτηση save για ευκολία
+                    updateDrawerMenu()
+                    exitSelectionMode()
                     true
                 }
 
-                R.id.action_delete -> { confirmBulkDelete(selectedFiles); true }
-                R.id.action_copy   -> { startBulkMove(selectedFiles, isCut = false); true }
-                R.id.action_cut    -> { startBulkMove(selectedFiles, isCut = true); true }
+                R.id.action_delete -> {
+                    confirmBulkDelete(selectedFiles); true
+                }
+
+                R.id.action_copy -> {
+                    startBulkMove(selectedFiles, isCut = false); true
+                }
+
+                R.id.action_cut -> {
+                    startBulkMove(selectedFiles, isCut = true); true
+                }
+
                 R.id.action_rename -> {
                     if (selectedFiles.size == 1) showRenameDialog(selectedFiles[0])
                     true
                 }
+
                 else -> false
             }
         }
@@ -118,6 +138,9 @@ class MainActivity : AppCompatActivity() {
         setupNavigationDrawer()
         setupBackNavigation()
         checkPermissions()
+        loadFavoritesFromPrefs() // Φόρτωση
+        updateDrawerMenu()       // Σχεδιασμός μενού
+        setupDrawerDragAndDrop() // Ενεργοποίηση Drag & Drop
         loadFiles(currentPath)
     }
 
@@ -614,30 +637,42 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateDrawerMenu() {
         val menu = binding.navigationView.menu
+        val favoriteItem = menu.findItem(R.id.nav_favorites_group) ?:
+        menu.addSubMenu(0, R.id.nav_favorites_group, 100, "Αγαπημένα").item
 
-        // Αναζήτηση του item που περιέχει το SubMenu
-        val favoriteItem = menu.findItem(R.id.nav_favorites_group)
-        val favoriteSubMenu = favoriteItem?.subMenu ?:
-        menu.addSubMenu(0, R.id.nav_favorites_group, 100, "Αγαπημένα")
-
+        val favoriteSubMenu = favoriteItem.subMenu!!
         favoriteSubMenu.clear()
 
-        favoritePaths.forEach { path ->
+        favoritePaths.forEachIndexed { index, path ->
             val file = File(path)
-            val menuItem = favoriteSubMenu.add(file.name)
-            menuItem.setIcon(android.R.drawable.btn_star_big_on)
+            val menuItem = favoriteSubMenu.add(0, index, index, file.name)
+            menuItem.setIcon(android.R.drawable.ic_dialog_map) // Ένα εικονίδιο φακέλου
+
+            // Ορίζουμε το custom layout για το δεξί μέρος
+            menuItem.setActionView(R.layout.menu_item_favorite)
+            val actionView = menuItem.actionView
+
+            // Λογική για το κουμπί διαγραφής (το "X" δεξιά)
+            actionView?.findViewById<ImageButton>(R.id.btnRemoveFavorite)?.setOnClickListener {
+                showRemoveFavoriteDialog(path)
+            }
 
             menuItem.setOnMenuItemClickListener {
-                // Αν ο χρήστης είναι ήδη στον φάκελο, ρωτάμε για αφαίρεση
-                if (currentPath.absolutePath == path) {
-                    showRemoveFavoriteDialog(path)
-                } else {
-                    loadFiles(file)
-                    binding.drawerLayout.closeDrawers()
-                }
+                loadFiles(file)
+                binding.drawerLayout.closeDrawers()
                 true
             }
         }
+    }
+
+    private fun saveFavorites() {
+        val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
+        val orderedString = favoritePaths.joinToString("|")
+        prefs.edit()
+            .putString("paths_ordered", orderedString)
+            // Προαιρετικά σβήνουμε το παλιό set για να μην πιάνει χώρο
+            .remove("paths")
+            .apply()
     }
 
     private fun showRemoveFavoriteDialog(path: String) {
@@ -645,15 +680,79 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Αφαίρεση από τα Αγαπημένα;")
             .setMessage("Θέλετε να αφαιρέσετε τον φάκελο ${File(path).name} από τη λίστα;")
             .setPositiveButton("Αφαίρεση") { _, _ ->
+                // 1. Αφαίρεση από τη λίστα στη μνήμη
                 favoritePaths.remove(path)
-                getSharedPreferences("favorites", MODE_PRIVATE)
-                    .edit()
-                    .putStringSet("paths", favoritePaths)
-                    .apply()
+
+                // 2. Αποθήκευση της λίστας ως String για να διατηρηθεί η σειρά
+                val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
+                val orderedString = favoritePaths.joinToString("|")
+                prefs.edit().putString("paths_ordered", orderedString).apply()
+
+                // 3. Ενημέρωση του μενού
                 updateDrawerMenu()
                 Toast.makeText(this, "Αφαιρέθηκε", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Άκυρο", null)
             .show()
+    }
+
+    private fun setupDrawerDragAndDrop() {
+        val navRecycler = binding.navigationView.getChildAt(0) as? RecyclerView ?: return
+
+        val itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+            ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0
+        ) {
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                val fromPos = viewHolder.adapterPosition
+                val toPos = target.adapterPosition
+
+                // ΒΑΣΙΚΗ ΑΛΛΑΓΗ: Το offset σου είναι 7 βάσει των logs
+                val offset = 7
+
+                if (fromPos < offset || toPos < offset) return false
+
+                val fromIdx = fromPos - offset
+                val toIdx = toPos - offset
+
+                // Έλεγχος αν οι δείκτες είναι μέσα στα όρια της λίστας (0 έως 2)
+                if (fromIdx in favoritePaths.indices && toIdx in favoritePaths.indices) {
+                    // 1. Swap στη λίστα
+                    java.util.Collections.swap(favoritePaths, fromIdx, toIdx)
+
+                    // 2. Ενημέρωση του Adapter
+                    recyclerView.adapter?.notifyItemMoved(fromPos, toPos)
+
+                    // 3. ΕΞΑΝΑΓΚΑΣΜΟΣ ανανέωσης για να παραμερίσουν οι άλλοι
+                    recyclerView.adapter?.notifyItemChanged(fromPos)
+                    recyclerView.adapter?.notifyItemChanged(toPos)
+
+                    return true
+                }
+                return false
+            }
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {}
+
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                // Σώζουμε και φρεσκάρουμε τα κουμπιά "X"
+                saveFavorites()
+                updateDrawerMenu()
+            }
+        })
+
+        itemTouchHelper.attachToRecyclerView(navRecycler)
+    }
+    private fun loadFavoritesFromPrefs() {
+        val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
+        val savedPaths = prefs.getString("paths_ordered", "")
+        if (!savedPaths.isNullOrEmpty()) {
+            favoritePaths.clear()
+            favoritePaths.addAll(savedPaths.split("|"))
+        }
     }
 }
