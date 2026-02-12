@@ -5,24 +5,25 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.view.View
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import androidx.core.view.GravityCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.ft_file_manager.databinding.ActivityMainBinding
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import java.io.File
-import androidx.activity.OnBackPressedCallback
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
-    private var fileToCopy: FileModel? = null
-    private var isCutOperation: Boolean = false
-    // Αντί για Environment.getExternalStorageDirectory()
     private var currentPath: File = File("/storage/emulated/0")
-    private var fullFileList = mutableListOf<FileModel>() // <--- ΠΡΟΣΘΕΣΤΕ ΑΥΤΗ ΤΗ ΓΡΑΜΜΗ
+    private var fullFileList = mutableListOf<FileModel>()
+    private var fileToMove: FileModel? = null
+    private var isCutOperation: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,16 +32,18 @@ class MainActivity : AppCompatActivity() {
 
         binding.recyclerView.layoutManager = LinearLayoutManager(this)
 
-        binding.fabPaste.setOnClickListener { pasteFile() }
-        binding.fabFtp.setOnClickListener {
-            // Βεβαιωθείτε ότι έχετε δημιουργήσει την FtpActivity
-            try {
-                startActivity(Intent(this, FtpActivity::class.java))
-            } catch (e: Exception) {
-                Toast.makeText(this, "FTP Activity not found", Toast.LENGTH_SHORT).show()
-            }
+        // LISTENERS ΚΟΥΜΠΙΩΝ
+        binding.toolbar.setNavigationOnClickListener {
+            binding.drawerLayout.openDrawer(GravityCompat.START)
         }
 
+        binding.fabPaste.setOnClickListener { pasteFile() }
+
+        binding.btnNewFolder.setOnClickListener { showCreateFolderDialog() }
+        binding.btnSort.setOnClickListener { showSortDialog() }
+        binding.btnSelectAll.setOnClickListener { /* logic for select all */ }
+
+        setupNavigationDrawer()
         setupBackNavigation()
         checkPermissions()
         loadFiles(currentPath)
@@ -55,27 +58,36 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupNavigationDrawer() {
+        binding.navigationView.setNavigationItemSelectedListener { item ->
+            when (item.itemId) {
+                R.id.nav_internal -> loadFiles(Environment.getExternalStorageDirectory())
+                R.id.nav_root -> loadFiles(File("/"))
+                R.id.nav_ftp -> startActivity(Intent(this, FtpActivity::class.java))
+                R.id.nav_external -> {
+                    val dirs = getExternalFilesDirs(null)
+                    if (dirs.size > 1) loadFiles(dirs[1])
+                    else Toast.makeText(this, "SD Card not found", Toast.LENGTH_SHORT).show()
+                }
+            }
+            binding.drawerLayout.closeDrawers()
+            true
+        }
+    }
+
     private fun loadFiles(directory: File) {
         currentPath = directory
-        // Ενημέρωση τίτλου για να ξέρεις πού βρίσκεσαι
         binding.toolbar.title = directory.name.ifEmpty { "Internal Storage" }
 
         val fileList = mutableListOf<FileModel>()
         val files = directory.listFiles()
 
         if (files != null) {
-            // ΚΑΝΟΝΙΚΗ ΠΡΟΣΒΑΣΗ
             files.forEach {
-                fileList.add(FileModel(
-                    it.name,
-                    it.absolutePath,
-                    it.isDirectory,
-                    if (it.isDirectory) "Φάκελος" else "${it.length() / 1024} KB",
-                    isRoot = false
-                ))
+                fileList.add(FileModel(it.name, it.absolutePath, it.isDirectory,
+                    if (it.isDirectory) "Φάκελος" else "${it.length() / 1024} KB", false))
             }
         } else {
-            // ROOT ΠΡΟΣΒΑΣΗ (Μόνο αν η Java επιστρέψει null)
             val output = RootHelper.runRootCommandWithOutput("ls -ap '${directory.absolutePath}'")
             if (output.isNotEmpty()) {
                 output.split("\n").forEach { line ->
@@ -83,31 +95,20 @@ class MainActivity : AppCompatActivity() {
                     if (name.isNotEmpty() && name != "./" && name != "../") {
                         val isDir = name.endsWith("/")
                         val cleanName = if (isDir) name.dropLast(1) else name
-                        fileList.add(FileModel(
-                            cleanName,
-                            "${directory.absolutePath}/$cleanName",
-                            isDir,
-                            if (isDir) "Φάκελος" else "System File",
-                            isRoot = true
-                        ))
+                        fileList.add(FileModel(cleanName, "${directory.absolutePath}/$cleanName", isDir,
+                            if (isDir) "Φάκελος" else "System File", true))
                     }
                 }
             }
         }
 
-        // Αν η λίστα είναι ακόμα άδεια, ίσως φταίει το Permission
-        if (fileList.isEmpty() && !directory.canRead()) {
-            Toast.makeText(this, "Αποτυχία ανάγνωσης. Ελέγξτε τα δικαιώματα!", Toast.LENGTH_LONG).show()
-        }
-
-        // Ταξινόμηση
         fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
-
-        // Ενημέρωση της λίστας για την αναζήτηση
         fullFileList = fileList
+        updateAdapter(fileList)
+    }
 
-        // Ανάθεση στον Adapter
-        binding.recyclerView.adapter = FileAdapter(fileList,
+    private fun updateAdapter(list: List<FileModel>) {
+        binding.recyclerView.adapter = FileAdapter(list,
             onItemClick = { selectedFile ->
                 val file = File(selectedFile.path)
                 if (selectedFile.isDirectory) loadFiles(file) else openFile(file)
@@ -121,9 +122,15 @@ class MainActivity : AppCompatActivity() {
         val view = layoutInflater.inflate(R.layout.layout_file_options, null)
 
         view.findViewById<TextView>(R.id.btnCopy).setOnClickListener {
-            fileToCopy = file
+            fileToMove = file
             isCutOperation = false
-            Toast.makeText(this, "Αντιγράφηκε", Toast.LENGTH_SHORT).show()
+            binding.fabPaste.show()
+            dialog.dismiss()
+        }
+
+        view.findViewById<TextView>(R.id.btnCut).setOnClickListener {
+            fileToMove = file
+            isCutOperation = true
             binding.fabPaste.show()
             dialog.dismiss()
         }
@@ -147,71 +154,91 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun confirmDelete(file: FileModel) {
-        AlertDialog.Builder(this)
-            .setTitle("Διαγραφή")
-            .setMessage("Είσαι σίγουρος ότι θέλεις να διαγράψεις το ${file.name};")
-            .setPositiveButton("Ναι") { _, _ ->
-                val deleted = if (file.isRoot) {
-                    RootHelper.runRootCommand("rm -rf '${file.path}'")
-                } else {
-                    File(file.path).deleteRecursively()
-                }
+    private fun pasteFile() {
+        val sourceFileModel = fileToMove ?: return
+        val sourceFile = File(sourceFileModel.path)
+        val destinationFile = File(currentPath, sourceFile.name)
 
-                if (deleted) {
-                    Toast.makeText(this, "Διαγράφηκε", Toast.LENGTH_SHORT).show()
-                    loadFiles(currentPath)
+        Thread {
+            var success = false
+            try {
+                if (isCutOperation) {
+                    // 1. Προσπάθεια για γρήγορη μετακίνηση (λειτουργεί μόνο στον ίδιο δίσκο)
+                    success = if (sourceFileModel.isRoot) {
+                        RootHelper.runRootCommand("mv '${sourceFile.absolutePath}' '${destinationFile.absolutePath}'")
+                    } else {
+                        sourceFile.renameTo(destinationFile)
+                    }
+
+                    // 2. FALLBACK: Αν το renameTo απέτυχε (π.χ. από Internal σε SD Card)
+                    if (!success) {
+                        if (sourceFile.copyRecursively(destinationFile, overwrite = true)) {
+                            success = sourceFile.deleteRecursively() // Διαγραφή του αρχικού αν πέτυχε η αντιγραφή
+                        }
+                    }
                 } else {
-                    Toast.makeText(this, "Αποτυχία διαγραφής", Toast.LENGTH_SHORT).show()
+                    // ΑΠΛΗ ΑΝΤΙΓΡΑΦΗ
+                    success = if (sourceFileModel.isRoot) {
+                        RootHelper.runRootCommand("cp -r '${sourceFile.absolutePath}' '${destinationFile.absolutePath}'")
+                    } else {
+                        sourceFile.copyRecursively(destinationFile, overwrite = true)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            runOnUiThread {
+                if (success) {
+                    loadFiles(currentPath)
+                    binding.fabPaste.hide()
+                    fileToMove = null
+                    Toast.makeText(this, "Ολοκληρώθηκε!", Toast.LENGTH_SHORT).show()
+                } else {
+                    // Αν αποτύχει στην SD κάρτα, πιθανότατα φταίει το SAF Permission
+                    Toast.makeText(this, "Αποτυχία. Βεβαιωθείτε ότι η SD Card έχει δικαιώματα εγγραφής.", Toast.LENGTH_LONG).show()
                 }
             }
-            .setNegativeButton("Όχι", null)
+        }.start()
+    }
+
+    private fun showCreateFolderDialog() {
+        val input = android.widget.EditText(this)
+        input.hint = "Όνομα φακέλου"
+        AlertDialog.Builder(this)
+            .setTitle("Νέος Φάκελος")
+            .setView(input)
+            .setPositiveButton("Δημιουργία") { _, _ ->
+                val newDir = File(currentPath, input.text.toString())
+                if (newDir.mkdir()) loadFiles(currentPath)
+                else Toast.makeText(this, "Αποτυχία", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Άκυρο", null)
             .show()
     }
 
-    private fun shareFile(fileModel: FileModel) {
-        val file = File(fileModel.path)
-        if (file.isDirectory) {
-            Toast.makeText(this, "Δεν μπορείτε να μοιραστείτε φάκελο", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        try {
-            val uri: Uri = FileProvider.getUriForFile(
-                this,
-                "${packageName}.provider",
-                file
-            )
-            val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "*/*"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    private fun showSortDialog() {
+        val options = arrayOf("Όνομα (Α-Ω)", "Όνομα (Ω-Α)", "Μέγεθος (Μεγάλα)")
+        AlertDialog.Builder(this)
+            .setTitle("Ταξινόμηση")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> fullFileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
+                    1 -> fullFileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenByDescending { it.name.lowercase() })
+                    2 -> { /* Add size logic */ }
+                }
+                updateAdapter(fullFileList)
             }
-            startActivity(Intent.createChooser(intent, "Share via"))
-        } catch (e: Exception) {
-            Toast.makeText(this, "Σφάλμα share: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun openFile(file: File) {
-        // Βασική υλοποίηση ανοίγματος αρχείου ανάλογα με το extension
-        Toast.makeText(this, "Άνοιγμα: ${file.name}", Toast.LENGTH_SHORT).show()
+            .show()
     }
 
     private fun setupBackNavigation() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                val parent = currentPath.parentFile
-
-                // Έλεγχος αν μπορούμε να πάμε πίσω στους φακέλους
-                // Σταματάμε αν φτάσουμε στο αρχικό Root του Storage ή στο "/" αν είμαστε σε root mode
                 val storageRoot = Environment.getExternalStorageDirectory().absolutePath
-
-                if (parent != null && currentPath.absolutePath != storageRoot && currentPath.absolutePath != "/") {
-                    loadFiles(parent)
+                if (currentPath.absolutePath != storageRoot && currentPath.absolutePath != "/" && currentPath.parentFile != null) {
+                    loadFiles(currentPath.parentFile!!)
                 } else {
-                    // Αν δεν υπάρχει άλλος φάκελος πίσω, απενεργοποιούμε το callback
-                    // και καλούμε ξανά το back για να κλείσει η εφαρμογή
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
                 }
@@ -219,73 +246,48 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    private fun confirmDelete(file: FileModel) {
+        AlertDialog.Builder(this)
+            .setTitle("Διαγραφή")
+            .setMessage("Θέλετε να διαγράψετε το ${file.name};")
+            .setPositiveButton("Ναι") { _, _ ->
+                val success = if (file.isRoot) RootHelper.runRootCommand("rm -rf '${file.path}'")
+                else File(file.path).deleteRecursively()
+                if (success) loadFiles(currentPath)
+            }
+            .setNegativeButton("Όχι", null)
+            .show()
+    }
+
+    private fun shareFile(fileModel: FileModel) {
+        val file = File(fileModel.path)
+        if (file.isDirectory) return
+        val uri = FileProvider.getUriForFile(this, "${packageName}.provider", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "*/*"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "Share via"))
+    }
+
+    private fun openFile(file: File) {
+        Toast.makeText(this, "Άνοιγμα: ${file.name}", Toast.LENGTH_SHORT).show()
+    }
+
     private fun showRenameDialog(fileModel: FileModel) {
         val input = android.widget.EditText(this)
         input.setText(fileModel.name)
-
         AlertDialog.Builder(this)
             .setTitle("Μετονομασία")
             .setView(input)
             .setPositiveButton("ΟΚ") { _, _ ->
-                val newName = input.text.toString()
-                val oldFile = File(fileModel.path)
-                val newFile = File(oldFile.parent, newName)
-
-                val success = if (fileModel.isRoot) {
-                    RootHelper.runRootCommand("mv '${oldFile.absolutePath}' '${newFile.absolutePath}'")
-                } else {
-                    oldFile.renameTo(newFile)
-                }
-
-                if (success) {
-                    loadFiles(currentPath)
-                    Toast.makeText(this, "Έγινε!", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this, "Αποτυχία", Toast.LENGTH_SHORT).show()
-                }
+                val newFile = File(File(fileModel.path).parent, input.text.toString())
+                val success = if (fileModel.isRoot) RootHelper.runRootCommand("mv '${fileModel.path}' '${newFile.absolutePath}'")
+                else File(fileModel.path).renameTo(newFile)
+                if (success) loadFiles(currentPath)
             }
             .setNegativeButton("Άκυρο", null)
             .show()
-    }
-
-    private fun pasteFile() {
-        fileToCopy?.let { source ->
-            val destination = File(currentPath, source.name)
-
-            Thread {
-                val success = if (source.isRoot) {
-                    RootHelper.runRootCommand("cp -r '${source.path}' '${destination.absolutePath}'")
-                } else {
-                    try {
-                        File(source.path).copyRecursively(destination, overwrite = true)
-                        true
-                    } catch (e: Exception) { false }
-                }
-
-                runOnUiThread {
-                    if (success) {
-                        loadFiles(currentPath)
-                        binding.fabPaste.hide()
-                        fileToCopy = null
-                    } else {
-                        Toast.makeText(this, "Αποτυχία επικόλλησης", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }.start()
-        }
-    }
-
-    private fun updateStorageInfo() {
-        val stat = android.os.StatFs(Environment.getExternalStorageDirectory().path)
-        val bytesAvailable = stat.blockSizeLong * stat.availableBlocksLong
-        val bytesTotal = stat.blockSizeLong * stat.blockCountLong
-
-        val used = (bytesTotal - bytesAvailable) / (1024 * 1024 * 1024)
-        val total = bytesTotal / (1024 * 1024 * 1024)
-        val progress = ((bytesTotal - bytesAvailable).toDouble() / bytesTotal * 100).toInt()
-
-        // Ενημέρωση UI (υποθέτοντας ότι το έχετε κάνει inflate στο header)
-        // binding.storageProgress.progress = progress
-        // binding.tvStorageText.text = "$used GB χρησιμοποιημένα από $total GB"
     }
 }
