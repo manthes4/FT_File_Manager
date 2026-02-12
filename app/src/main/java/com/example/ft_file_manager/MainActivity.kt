@@ -17,6 +17,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.example.ft_file_manager.databinding.ActivityMainBinding
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import java.io.File
+import kotlinx.coroutines.*
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -24,6 +25,9 @@ class MainActivity : AppCompatActivity() {
     private var fullFileList = mutableListOf<FileModel>()
     private var fileToMove: FileModel? = null
     private var isCutOperation: Boolean = false
+    private var isSelectionMode = false // Αυτή η γραμμή έλειπε!
+    private var bulkFilesToMove = listOf<FileModel>() // Νέα μεταβλητή στην κορυφή της κλάσης!
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -32,16 +36,68 @@ class MainActivity : AppCompatActivity() {
 
         binding.recyclerView.layoutManager = LinearLayoutManager(this)
 
-        // LISTENERS ΚΟΥΜΠΙΩΝ
+        // 1. Toolbar Navigation (Drawer)
         binding.toolbar.setNavigationOnClickListener {
             binding.drawerLayout.openDrawer(GravityCompat.START)
         }
 
-        binding.fabPaste.setOnClickListener { pasteFile() }
+        // 2. Toolbar Menu Items (Delete, Copy, κλπ)
+        binding.toolbar.setOnMenuItemClickListener { item ->
+            val selectedFiles = fullFileList.filter { it.isSelected }
+            when (item.itemId) {
+                R.id.action_delete -> {
+                    confirmBulkDelete(selectedFiles); true
+                }
 
-        binding.btnNewFolder.setOnClickListener { showCreateFolderDialog() }
+                R.id.action_copy -> {
+                    startBulkMove(selectedFiles, isCut = false); true
+                }
+
+                R.id.action_cut -> {
+                    startBulkMove(selectedFiles, isCut = true); true
+                }
+
+                R.id.action_rename -> {
+                    if (selectedFiles.size == 1) showRenameDialog(selectedFiles[0])
+                    true
+                }
+
+                else -> false
+            }
+        }
+
+        // 3. Bottom Bar Buttons
+        binding.btnSelectAll.setOnClickListener {
+            if (!isSelectionMode) toggleSelectionMode(true)
+            val allSelected = fullFileList.all { it.isSelected }
+            fullFileList.forEach { it.isSelected = !allSelected }
+            binding.recyclerView.adapter?.notifyDataSetChanged()
+
+            val count = fullFileList.count { it.isSelected }
+            if (count == 0) exitSelectionMode()
+            else {
+                binding.toolbar.title = "$count επιλεγμένα"
+                updateMenuVisibility()
+            }
+        }
+
+        binding.fabPaste.setOnClickListener { pasteFile() }
+        binding.btnNewFolder.setOnClickListener { view ->
+            val popup = androidx.appcompat.widget.PopupMenu(this, view)
+            popup.menu.add("Νέος Φάκελος")
+            popup.menu.add("Νέο Αρχείο (.txt)")
+
+            popup.setOnMenuItemClickListener { item ->
+                when (item.title) {
+                    "Νέος Φάκελος" -> showCreateItemDialog(isDirectory = true)
+                    "Νέο Αρχείο (.txt)" -> showCreateItemDialog(isDirectory = false)
+                }
+                true
+            }
+            popup.show()
+        }
+
         binding.btnSort.setOnClickListener { showSortDialog() }
-        binding.btnSelectAll.setOnClickListener { /* logic for select all */ }
 
         setupNavigationDrawer()
         setupBackNavigation()
@@ -65,56 +121,96 @@ class MainActivity : AppCompatActivity() {
                 R.id.nav_root -> loadFiles(File("/"))
                 R.id.nav_ftp -> startActivity(Intent(this, FtpActivity::class.java))
                 R.id.nav_external -> {
-                    val dirs = getExternalFilesDirs(null)
-                    if (dirs.size > 1) loadFiles(dirs[1])
-                    else Toast.makeText(this, "SD Card not found", Toast.LENGTH_SHORT).show()
+                    val externalDirs = getExternalFilesDirs(null)
+                    // Το dirs[0] είναι η εσωτερική μνήμη, το dirs[1] (αν υπάρχει) είναι η SD Card
+                    if (externalDirs.size > 1 && externalDirs[1] != null) {
+                        // Παίρνουμε το root της SD Card (πριν το /Android/data/...)
+                        val sdCardPath = externalDirs[1].absolutePath.split("/Android")[0]
+                        loadFiles(File(sdCardPath))
+                    } else {
+                        Toast.makeText(this, "Η SD Card δεν βρέθηκε", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
+
             binding.drawerLayout.closeDrawers()
             true
         }
     }
 
+    // Μέσα στην MainActivity
     private fun loadFiles(directory: File) {
         currentPath = directory
         binding.toolbar.title = directory.name.ifEmpty { "Internal Storage" }
 
-        val fileList = mutableListOf<FileModel>()
-        val files = directory.listFiles()
+        // Χρησιμοποιούμε Coroutine για να τρέξουμε το RootTools
+        MainScope().launch {
+            val fileList = mutableListOf<FileModel>()
 
-        if (files != null) {
-            files.forEach {
-                fileList.add(FileModel(it.name, it.absolutePath, it.isDirectory,
-                    if (it.isDirectory) "Φάκελος" else "${it.length() / 1024} KB", false))
-            }
-        } else {
-            val output = RootHelper.runRootCommandWithOutput("ls -ap '${directory.absolutePath}'")
-            if (output.isNotEmpty()) {
-                output.split("\n").forEach { line ->
-                    val name = line.trim()
-                    if (name.isNotEmpty() && name != "./" && name != "../") {
-                        val isDir = name.endsWith("/")
-                        val cleanName = if (isDir) name.dropLast(1) else name
-                        fileList.add(FileModel(cleanName, "${directory.absolutePath}/$cleanName", isDir,
-                            if (isDir) "Φάκελος" else "System File", true))
+            // Δοκιμάζουμε την κανονική ανάγνωση (Java File API)
+            val files = withContext(Dispatchers.IO) { directory.listFiles() }
+
+            if (files != null) {
+                files.forEach {
+                    fileList.add(
+                        FileModel(
+                            it.name, it.absolutePath, it.isDirectory,
+                            if (it.isDirectory) "Φάκελος" else "${it.length() / 1024} KB", false
+                        )
+                    )
+                }
+            } else {
+                // ΕΔΩ χρησιμοποιούμε το ΝΕΟ RootTools
+                val output = RootTools.getOutput("ls -F '${directory.absolutePath}'")
+                if (output.isNotEmpty() && !output.contains("Error:")) {
+                    output.split("\n").forEach { line ->
+                        val name = line.trim()
+                        if (name.isNotEmpty()) {
+                            val isDir = name.endsWith("/")
+                            val cleanName = if (isDir) name.dropLast(1) else name
+                            fileList.add(
+                                FileModel(
+                                    cleanName, "${directory.absolutePath}/$cleanName", isDir,
+                                    if (isDir) "Φάκελος" else "System File", true
+                                )
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
-        fullFileList = fileList
-        updateAdapter(fileList)
+            fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
+            fullFileList = fileList
+            updateAdapter(fileList)
+        }
     }
 
     private fun updateAdapter(list: List<FileModel>) {
-        binding.recyclerView.adapter = FileAdapter(list,
+        val adapter = FileAdapter(
+            list,
+            isInSelectionMode = isSelectionMode,
             onItemClick = { selectedFile ->
                 val file = File(selectedFile.path)
                 if (selectedFile.isDirectory) loadFiles(file) else openFile(file)
             },
-            onItemLongClick = { selectedFile -> showOptionsDialog(selectedFile) }
+            onItemLongClick = { selectedFile ->
+                if (!isSelectionMode) {
+                    selectedFile.isSelected = true
+                    toggleSelectionMode(true)
+                    // Αφαιρέθηκε το showOptionsDialog(selectedFile)
+                }
+            },
+            onSelectionChanged = {
+                val count = fullFileList.count { it.isSelected }
+                if (count == 0) {
+                    exitSelectionMode()
+                } else {
+                    binding.toolbar.title = "$count επιλεγμένα"
+                    updateMenuVisibility()
+                }
+            }
         )
+        binding.recyclerView.adapter = adapter
     }
 
     private fun showOptionsDialog(file: FileModel) {
@@ -155,51 +251,78 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun pasteFile() {
-        val sourceFileModel = fileToMove ?: return
-        val sourceFile = File(sourceFileModel.path)
-        val destinationFile = File(currentPath, sourceFile.name)
+        val filesToProcess = if (fileToMove != null) listOf(fileToMove!!) else bulkFilesToMove
+        if (filesToProcess.isEmpty()) return
 
-        Thread {
-            var success = false
-            try {
-                if (isCutOperation) {
-                    // 1. Προσπάθεια για γρήγορη μετακίνηση (λειτουργεί μόνο στον ίδιο δίσκο)
-                    success = if (sourceFileModel.isRoot) {
-                        RootHelper.runRootCommand("mv '${sourceFile.absolutePath}' '${destinationFile.absolutePath}'")
-                    } else {
-                        sourceFile.renameTo(destinationFile)
-                    }
+        // Χρησιμοποιούμε Coroutine γιατί το RootTools είναι suspend
+        MainScope().launch {
+            binding.progressBar.visibility = View.VISIBLE // Εμφάνιση
+            var allSuccess = true
 
-                    // 2. FALLBACK: Αν το renameTo απέτυχε (π.χ. από Internal σε SD Card)
-                    if (!success) {
-                        if (sourceFile.copyRecursively(destinationFile, overwrite = true)) {
-                            success = sourceFile.deleteRecursively() // Διαγραφή του αρχικού αν πέτυχε η αντιγραφή
+            // Έλεγχος αν ο προορισμός είναι στο σύστημα
+            val isSystemTarget = currentPath.absolutePath.startsWith("/system") ||
+                    currentPath.absolutePath.startsWith("/vendor")
+
+            if (isSystemTarget) {
+                val unlocked = RootTools.unlockSystem()
+                if (!unlocked) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Αποτυχία ξεκλειδώματος συστήματος (Read-Only)",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    // Συνεχίζουμε παρ' όλα αυτά, μήπως και πέτυχε αθόρυβα
+                }
+            }
+
+            withContext(Dispatchers.IO) {
+                filesToProcess.forEach { model ->
+                    val source = File(model.path)
+                    val dest = File(currentPath, source.name)
+
+                    try {
+                        if (isCutOperation) {
+                            // Χρήση RootTools για μετακίνηση στο σύστημα
+                            val moved = if (isSystemTarget || model.isRoot) {
+                                RootTools.executeSilent("mv '${source.absolutePath}' '${dest.absolutePath}'")
+                            } else {
+                                source.renameTo(dest)
+                            }
+                            if (!moved) allSuccess = false
+                        } else {
+                            // Χρήση RootTools για αντιγραφή στο σύστημα
+                            val copied = if (isSystemTarget || model.isRoot) {
+                                RootTools.executeSilent("cp -r '${source.absolutePath}' '${dest.absolutePath}'")
+                            } else {
+                                source.copyRecursively(dest, true)
+                            }
+                            if (!copied) allSuccess = false
                         }
-                    }
-                } else {
-                    // ΑΠΛΗ ΑΝΤΙΓΡΑΦΗ
-                    success = if (sourceFileModel.isRoot) {
-                        RootHelper.runRootCommand("cp -r '${sourceFile.absolutePath}' '${destinationFile.absolutePath}'")
-                    } else {
-                        sourceFile.copyRecursively(destinationFile, overwrite = true)
+                    } catch (e: Exception) {
+                        allSuccess = false
                     }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
             }
 
-            runOnUiThread {
-                if (success) {
-                    loadFiles(currentPath)
-                    binding.fabPaste.hide()
-                    fileToMove = null
-                    Toast.makeText(this, "Ολοκληρώθηκε!", Toast.LENGTH_SHORT).show()
-                } else {
-                    // Αν αποτύχει στην SD κάρτα, πιθανότατα φταίει το SAF Permission
-                    Toast.makeText(this, "Αποτυχία. Βεβαιωθείτε ότι η SD Card έχει δικαιώματα εγγραφής.", Toast.LENGTH_LONG).show()
-                }
+            // ΕΔΩ ΠΡΟΣΘΕΤΟΥΜΕ ΤΟ LOCK
+            if (isSystemTarget) {
+                RootTools.lockSystem()
             }
-        }.start()
+
+            binding.progressBar.visibility = View.GONE // Εξαφάνιση
+            loadFiles(currentPath)
+
+            // Επιστροφή στο UI
+            loadFiles(currentPath)
+            binding.fabPaste.hide()
+            fileToMove = null
+            bulkFilesToMove = emptyList()
+            Toast.makeText(
+                this@MainActivity,
+                if (allSuccess) "Η αντιγραφή ολοκληρώθηκε!" else "Αποτυχία σε κάποια αρχεία",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     private fun showCreateFolderDialog() {
@@ -225,7 +348,8 @@ class MainActivity : AppCompatActivity() {
                 when (which) {
                     0 -> fullFileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
                     1 -> fullFileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenByDescending { it.name.lowercase() })
-                    2 -> { /* Add size logic */ }
+                    2 -> { /* Add size logic */
+                    }
                 }
                 updateAdapter(fullFileList)
             }
@@ -251,9 +375,23 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Διαγραφή")
             .setMessage("Θέλετε να διαγράψετε το ${file.name};")
             .setPositiveButton("Ναι") { _, _ ->
-                val success = if (file.isRoot) RootHelper.runRootCommand("rm -rf '${file.path}'")
-                else File(file.path).deleteRecursively()
-                if (success) loadFiles(currentPath)
+                MainScope().launch {
+                    val isSystem =
+                        file.path.startsWith("/system") || file.path.startsWith("/vendor")
+                    if (isSystem) RootTools.unlockSystem()
+
+                    val success = withContext(Dispatchers.IO) {
+                        if (file.isRoot || isSystem) {
+                            RootTools.executeSilent("rm -rf '${file.path}'")
+                        } else {
+                            File(file.path).deleteRecursively()
+                        }
+                    }
+
+                    if (success) loadFiles(currentPath)
+                    else Toast.makeText(this@MainActivity, "Αποτυχία διαγραφής", Toast.LENGTH_SHORT)
+                        .show()
+                }
             }
             .setNegativeButton("Όχι", null)
             .show()
@@ -282,10 +420,177 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Μετονομασία")
             .setView(input)
             .setPositiveButton("ΟΚ") { _, _ ->
-                val newFile = File(File(fileModel.path).parent, input.text.toString())
-                val success = if (fileModel.isRoot) RootHelper.runRootCommand("mv '${fileModel.path}' '${newFile.absolutePath}'")
-                else File(fileModel.path).renameTo(newFile)
-                if (success) loadFiles(currentPath)
+                val newName = input.text.toString()
+                if (newName.isNotEmpty()) {
+                    MainScope().launch {
+                        val isSystem =
+                            fileModel.path.startsWith("/system") || fileModel.path.startsWith("/vendor")
+                        if (isSystem) RootTools.unlockSystem()
+
+                        val parentPath = File(fileModel.path).parent
+                        val newPath = "$parentPath/$newName"
+
+                        val success = withContext(Dispatchers.IO) {
+                            if (fileModel.isRoot || isSystem) {
+                                RootTools.executeSilent("mv '${fileModel.path}' '$newPath'")
+                            } else {
+                                File(fileModel.path).renameTo(File(newPath))
+                            }
+                        }
+
+                        if (success) {
+                            loadFiles(currentPath)
+                            exitSelectionMode()
+                        } else {
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Αποτυχία μετονομασίας",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                }
+            }
+            .setNegativeButton("Άκυρο", null)
+            .show()
+    }
+
+    private fun toggleSelectionMode(enabled: Boolean) {
+        isSelectionMode = enabled
+        binding.toolbar.menu.clear()
+
+        if (enabled) {
+            binding.toolbar.inflateMenu(R.menu.contextual_menu)
+            binding.toolbar.setNavigationIcon(android.R.drawable.ic_menu_close_clear_cancel)
+            binding.toolbar.setNavigationOnClickListener { exitSelectionMode() }
+            updateMenuVisibility()
+        } else {
+            binding.toolbar.setNavigationIcon(android.R.drawable.ic_menu_sort_by_size)
+            binding.toolbar.title = currentPath.name.ifEmpty { "Internal Storage" }
+            binding.toolbar.setNavigationOnClickListener {
+                binding.drawerLayout.openDrawer(androidx.core.view.GravityCompat.START)
+            }
+        }
+
+        (binding.recyclerView.adapter as? FileAdapter)?.let {
+            it.isInSelectionMode = enabled
+            it.notifyDataSetChanged()
+        }
+    }
+
+    // Έλεγχος αν θα φαίνεται το Rename
+    private fun updateMenuVisibility() {
+        val selectedCount = fullFileList.count { it.isSelected }
+        val renameItem = binding.toolbar.menu.findItem(R.id.action_rename)
+        renameItem?.isVisible = (selectedCount == 1) // Μόνο αν είναι 1 επιλεγμένο
+    }
+
+    private fun exitSelectionMode() {
+        fullFileList.forEach { it.isSelected = false }
+        isSelectionMode = false
+        toggleSelectionMode(false)
+    }
+
+    // Για Μαζική Διαγραφή
+    private fun confirmBulkDelete(selectedFiles: List<FileModel>) {
+        AlertDialog.Builder(this)
+            .setTitle("Μαζική Διαγραφή")
+            .setMessage("Είσαι σίγουρος ότι θέλεις να διαγράψεις ${selectedFiles.size} στοιχεία;")
+            .setPositiveButton("Ναι") { _, _ ->
+                MainScope().launch {
+                    val isSystem = currentPath.absolutePath.startsWith("/system") ||
+                            currentPath.absolutePath.startsWith("/vendor")
+
+                    if (isSystem) RootTools.unlockSystem()
+
+                    val allSuccess = withContext(Dispatchers.IO) {
+                        var success = true
+                        selectedFiles.forEach { file ->
+                            val result = if (file.isRoot || isSystem) {
+                                RootTools.executeSilent("rm -rf '${file.path}'")
+                            } else {
+                                File(file.path).deleteRecursively()
+                            }
+                            if (!result) success = false
+                        }
+                        success
+                    }
+
+                    exitSelectionMode()
+                    loadFiles(currentPath)
+                    Toast.makeText(
+                        this@MainActivity,
+                        if (allSuccess) "Διαγράφηκαν επιτυχώς" else "Κάποιες διαγραφές απέτυχαν",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+            .setNegativeButton("Όχι", null)
+            .show()
+    }
+
+    private fun startBulkMove(selectedFiles: List<FileModel>, isCut: Boolean) {
+        bulkFilesToMove = selectedFiles
+        isCutOperation = isCut
+        fileToMove = null // Ακυρώνουμε την μεμονωμένη μεταφορά αν υπήρχε
+
+        Toast.makeText(
+            this,
+            "${selectedFiles.size} αρχεία έτοιμα για επικόλληση",
+            Toast.LENGTH_SHORT
+        ).show()
+        exitSelectionMode()
+        binding.fabPaste.show()
+    }
+
+    private fun showCreateItemDialog(isDirectory: Boolean) {
+        val input = android.widget.EditText(this)
+        input.hint = if (isDirectory) "Όνομα φακέλου" else "Όνομα αρχείου"
+
+        AlertDialog.Builder(this)
+            .setTitle(if (isDirectory) "Δημιουργία Φακέλου" else "Δημιουργία Αρχείου")
+            .setView(input)
+            .setPositiveButton("Δημιουργία") { _, _ ->
+                val name = input.text.toString()
+                if (name.isNotEmpty()) {
+                    MainScope().launch {
+                        val isSystemPath = currentPath.absolutePath.startsWith("/system") ||
+                                currentPath.absolutePath.startsWith("/vendor") ||
+                                currentPath.absolutePath == "/"
+
+                        val success = withContext(Dispatchers.IO) {
+                            try {
+                                if (isSystemPath) {
+                                    // Ξεκλείδωμα αν είναι σύστημα
+                                    RootTools.unlockSystem()
+
+                                    // Δημιουργία μέσω Root εντολών Linux
+                                    val fullPath =
+                                        "${currentPath.absolutePath}/$name".replace("//", "/")
+                                    val command =
+                                        if (isDirectory) "mkdir '$fullPath'" else "touch '$fullPath'"
+                                    RootTools.executeSilent(command)
+                                } else {
+                                    // Κανονική δημιουργία για εσωτερική μνήμη
+                                    val newItem = File(currentPath, name)
+                                    if (isDirectory) newItem.mkdir() else newItem.createNewFile()
+                                }
+                            } catch (e: Exception) {
+                                false
+                            }
+                        }
+
+                        if (success) {
+                            loadFiles(currentPath)
+                        } else {
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Αποτυχία δημιουργίας (Root;)",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                }
             }
             .setNegativeButton("Άκυρο", null)
             .show()

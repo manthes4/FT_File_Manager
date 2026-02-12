@@ -78,13 +78,13 @@ class FtpActivity : AppCompatActivity() {
                 fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
 
                 runOnUiThread {
-                    // Μέσα στη loadFtpFiles, στο σημείο που ορίζεις τον Adapter:
-                    binding.ftpRecyclerView.adapter = FileAdapter(fileList,
+                    binding.ftpRecyclerView.adapter = FileAdapter(
+                        files = fileList,
+                        isInSelectionMode = false, // Στο FTP ξεκινάμε χωρίς selection mode
                         onItemClick = { selectedFile ->
                             if (selectedFile.isDirectory) {
                                 loadFtpFiles(selectedFile.path)
                             } else {
-                                // Επιβεβαίωση λήψης με ένα απλό Dialog
                                 AlertDialog.Builder(this)
                                     .setTitle("Λήψη αρχείου")
                                     .setMessage("Θέλετε να κατεβάσετε το ${selectedFile.name};")
@@ -95,7 +95,15 @@ class FtpActivity : AppCompatActivity() {
                                     .show()
                             }
                         },
-                        onItemLongClick = { /* ... */ }
+                        onItemLongClick = { selectedFile ->
+                            // Αν δεν θέλεις επιλογή στο FTP ακόμα, άστο κενό ή εμφάνισε ένα Toast
+                            Toast.makeText(this, "Long click: ${selectedFile.name}", Toast.LENGTH_SHORT).show()
+                        },
+                        onSelectionChanged = {
+                            // Αυτή είναι η παράμετρος που έλειπε!
+                            // Αφού isInSelectionMode = false, αυτή η συνάρτηση δεν θα κληθεί ποτέ,
+                            // αλλά ο Adapter τη χρειάζεται για να γίνει compile.
+                        }
                     )
                 }
             } catch (e: Exception) {
@@ -159,12 +167,16 @@ class FtpActivity : AppCompatActivity() {
                 val result = ftpClient.retrieveFile(remoteFilePath, outputStream)
                 outputStream.close()
                 result
-            } catch (e: Exception) { false }
+            } catch (e: Exception) {
+                false
+            }
 
             runOnUiThread {
                 progressDialog.dismiss()
                 if (success) {
-                    Toast.makeText(this, "Ολοκληρώθηκε!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Η λήψη ολοκληρώθηκε!", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this, "Αποτυχία λήψης αρχείου.", Toast.LENGTH_SHORT).show()
                 }
             }
         }.start()
