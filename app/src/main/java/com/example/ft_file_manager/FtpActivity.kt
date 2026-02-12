@@ -35,20 +35,42 @@ class FtpActivity : AppCompatActivity() {
     }
 
     private fun connectToFtp(host: String, user: String, pass: String) {
+        // 1. Δείξε ένα μήνυμα αναμονής
+        val pd = android.app.ProgressDialog(this)
+        pd.setMessage("Σύνδεση στο $host...")
+        pd.show()
+
         Thread {
             try {
                 ftpClient.connect(host, 21)
-                ftpClient.login(user, pass)
-                ftpClient.enterLocalPassiveMode()
-                ftpClient.setFileType(FTP.BINARY_FILE_TYPE)
+                val loginSuccess = ftpClient.login(user, pass)
 
-                runOnUiThread {
-                    binding.loginLayout.visibility = View.GONE
-                    binding.ftpRecyclerView.visibility = View.VISIBLE
-                    loadFtpFiles("/")
+                if (loginSuccess) {
+                    ftpClient.enterLocalPassiveMode()
+                    ftpClient.setFileType(FTP.BINARY_FILE_TYPE)
+
+                    runOnUiThread {
+                        pd.dismiss()
+                        binding.loginLayout.visibility = View.GONE
+                        binding.ftpRecyclerView.visibility = View.VISIBLE
+                        loadFtpFiles("/")
+                    }
+                } else {
+                    runOnUiThread {
+                        pd.dismiss()
+                        Toast.makeText(this, "Λάθος στοιχεία σύνδεσης", Toast.LENGTH_LONG).show()
+                    }
                 }
             } catch (e: Exception) {
-                runOnUiThread { Toast.makeText(this, "Σφάλμα: ${e.message}", Toast.LENGTH_LONG).show() }
+                runOnUiThread {
+                    pd.dismiss()
+                    // ΑΥΤΟ ΘΑ ΣΟΥ ΠΕΙ ΤΟ ΠΡΑΓΜΑΤΙΚΟ ΣΦΑΛΜΑ (π.χ. Connection Refused)
+                    Toast.makeText(
+                        this,
+                        "Σφάλμα Σύνδεσης: ${e.localizedMessage}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         }.start()
     }
@@ -58,56 +80,72 @@ class FtpActivity : AppCompatActivity() {
             try {
                 ftpClient.changeWorkingDirectory(path)
                 currentFtpPath = path
-                val ftpFiles = ftpClient.listFiles()
-                val fileList = mutableListOf<FileModel>()
 
+                // 1. Έλεγχος αν τα αρχεία είναι null
+                val ftpFiles = ftpClient.listFiles()
+                if (ftpFiles == null) {
+                    runOnUiThread {
+                        Toast.makeText(
+                            this,
+                            "Αδυναμία ανάγνωσης φακέλου",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    return@Thread
+                }
+
+                val fileList = mutableListOf<FileModel>()
                 ftpFiles.forEach { file ->
-                    // Αγνοούμε τα τρέχοντα και γονικά directories του Linux
                     if (file.name != "." && file.name != "..") {
-                        fileList.add(FileModel(
-                            name = file.name,
-                            path = if (path == "/") "/${file.name}" else "$path/${file.name}",
-                            isDirectory = file.isDirectory,
-                            size = if (file.isDirectory) "Φάκελος" else "${file.size / 1024} KB",
-                            isRoot = false // Τα FTP αρχεία δεν θεωρούνται local root
-                        ))
+                        fileList.add(
+                            FileModel(
+                                name = file.name,
+                                path = if (path == "/") "/${file.name}" else "$path/${file.name}",
+                                isDirectory = file.isDirectory,
+                                size = if (file.isDirectory) "Φάκελος" else "${file.size / 1024} KB",
+                                isRoot = false
+                            )
+                        )
                     }
                 }
 
-                // Ταξινόμηση
+                // 2. Έλεγχος αν η λίστα είναι άδεια
+                if (fileList.isEmpty()) {
+                    runOnUiThread {
+                        Toast.makeText(this, "Ο φάκελος είναι άδειος", Toast.LENGTH_SHORT).show()
+                        // Ακόμα και αν είναι άδειος, πρέπει να βάλουμε τον adapter για να καθαρίσει η οθόνη
+                    }
+                }
+
                 fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
 
                 runOnUiThread {
                     binding.ftpRecyclerView.adapter = FileAdapter(
                         files = fileList,
-                        isInSelectionMode = false, // Στο FTP ξεκινάμε χωρίς selection mode
+                        isInSelectionMode = false,
                         onItemClick = { selectedFile ->
                             if (selectedFile.isDirectory) {
                                 loadFtpFiles(selectedFile.path)
                             } else {
+                                // Χρησιμοποιούμε το όνομα της συνάρτησης που ήδη έχεις ορίσει παρακάτω
                                 AlertDialog.Builder(this)
                                     .setTitle("Λήψη αρχείου")
                                     .setMessage("Θέλετε να κατεβάσετε το ${selectedFile.name};")
                                     .setPositiveButton("Ναι") { _, _ ->
-                                        downloadFile(selectedFile.path, selectedFile.name)
+                                        downloadFileWithProgress(selectedFile.path, selectedFile.name)
                                     }
                                     .setNegativeButton("Άκυρο", null)
                                     .show()
                             }
                         },
-                        onItemLongClick = { selectedFile ->
-                            // Αν δεν θέλεις επιλογή στο FTP ακόμα, άστο κενό ή εμφάνισε ένα Toast
-                            Toast.makeText(this, "Long click: ${selectedFile.name}", Toast.LENGTH_SHORT).show()
-                        },
-                        onSelectionChanged = {
-                            // Αυτή είναι η παράμετρος που έλειπε!
-                            // Αφού isInSelectionMode = false, αυτή η συνάρτηση δεν θα κληθεί ποτέ,
-                            // αλλά ο Adapter τη χρειάζεται για να γίνει compile.
-                        }
+                        onItemLongClick = { /* ... */ },
+                        onSelectionChanged = { /* ... */ }
                     )
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                runOnUiThread {
+                    Toast.makeText(this, "Σφάλμα λίστας: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             }
         }.start()
     }
@@ -139,7 +177,11 @@ class FtpActivity : AppCompatActivity() {
 
                 runOnUiThread {
                     if (success) {
-                        Toast.makeText(this, "Το αρχείο αποθηκεύτηκε στα λήψεις!", Toast.LENGTH_LONG).show()
+                        Toast.makeText(
+                            this,
+                            "Το αρχείο αποθηκεύτηκε στα λήψεις!",
+                            Toast.LENGTH_LONG
+                        ).show()
                     } else {
                         Toast.makeText(this, "Αποτυχία λήψης", Toast.LENGTH_SHORT).show()
                     }
@@ -159,24 +201,45 @@ class FtpActivity : AppCompatActivity() {
         progressDialog.setCancelable(false)
         progressDialog.show()
 
-        val localFile = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName)
+        // Τοπικό αρχείο στο Downloads
+        val localFile = File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            fileName
+        )
 
         Thread {
-            val success = try {
+            var success = false
+            try {
+                // Εξασφαλίζουμε Binary Mode πριν τη λήψη
+                ftpClient.setFileType(FTP.BINARY_FILE_TYPE)
+
                 val outputStream = java.io.FileOutputStream(localFile)
-                val result = ftpClient.retrieveFile(remoteFilePath, outputStream)
+                // Χρησιμοποιούμε το remoteFilePath που έρχεται από το FileModel
+                success = ftpClient.retrieveFile(remoteFilePath, outputStream)
                 outputStream.close()
-                result
             } catch (e: Exception) {
-                false
+                e.printStackTrace()
+                runOnUiThread {
+                    Toast.makeText(
+                        this,
+                        "Σφάλμα Thread: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
 
             runOnUiThread {
                 progressDialog.dismiss()
                 if (success) {
-                    Toast.makeText(this, "Η λήψη ολοκληρώθηκε!", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Η λήψη ολοκληρώθηκε στο Downloads!", Toast.LENGTH_LONG)
+                        .show()
                 } else {
-                    Toast.makeText(this, "Αποτυχία λήψης αρχείου.", Toast.LENGTH_SHORT).show()
+                    // Αν αποτύχει, ίσως φταίει το path. Δοκιμάζουμε χωρίς το αρχικό "/" αν υπάρχει
+                    Toast.makeText(
+                        this,
+                        "Αποτυχία λήψης. Server Code: ${ftpClient.replyCode}",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
         }.start()
