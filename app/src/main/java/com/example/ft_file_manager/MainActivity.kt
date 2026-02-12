@@ -644,21 +644,36 @@ class MainActivity : AppCompatActivity() {
         favoriteSubMenu.clear()
 
         favoritePaths.forEachIndexed { index, path ->
-            val file = File(path)
-            val menuItem = favoriteSubMenu.add(0, index, index, file.name)
-            menuItem.setIcon(android.R.drawable.ic_dialog_map) // Ένα εικονίδιο φακέλου
+            // ΕΛΕΓΧΟΣ: Είναι FTP ή Τοπικό;
+            val isFtp = path.startsWith("ftp://")
+            val displayName = if (isFtp) path.replace("ftp://", "") else File(path).name
 
-            // Ορίζουμε το custom layout για το δεξί μέρος
+            val menuItem = favoriteSubMenu.add(0, index, index, displayName)
+
+            // Αλλαγή εικονιδίου αν είναι FTP
+            if (isFtp) {
+                menuItem.setIcon(android.R.drawable.ic_menu_share) // Εικονίδιο δικτύου/διαμοιρασμού
+            } else {
+                menuItem.setIcon(android.R.drawable.ic_dialog_map) // Εικονίδιο φακέλου
+            }
+
             menuItem.setActionView(R.layout.menu_item_favorite)
             val actionView = menuItem.actionView
 
-            // Λογική για το κουμπί διαγραφής (το "X" δεξιά)
             actionView?.findViewById<ImageButton>(R.id.btnRemoveFavorite)?.setOnClickListener {
                 showRemoveFavoriteDialog(path)
             }
 
             menuItem.setOnMenuItemClickListener {
-                loadFiles(file)
+                if (isFtp) {
+                    // ΑΝ ΕΙΝΑΙ FTP: Άνοιγμα της FtpActivity
+                    val intent = Intent(this, FtpActivity::class.java)
+                    intent.putExtra("TARGET_HOST", displayName) // Στέλνουμε το host
+                    startActivity(intent)
+                } else {
+                    // ΑΝ ΕΙΝΑΙ ΤΟΠΙΚΟ: Φόρτωση αρχείων όπως πριν
+                    loadFiles(File(path))
+                }
                 binding.drawerLayout.closeDrawers()
                 true
             }

@@ -23,6 +23,28 @@ class FtpActivity : AppCompatActivity() {
         binding = ActivityFtpBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        val prefs = getSharedPreferences("ftp_prefs", MODE_PRIVATE)
+
+        // 1. Πρώτα παίρνουμε τα τελευταία αποθηκευμένα στοιχεία
+        val lastHost = prefs.getString("last_host", "")
+        val lastUser = prefs.getString("last_user", "")
+        val lastPass = prefs.getString("last_pass", "")
+
+        // 2. ΕΛΕΓΧΟΣ: Μήπως ερχόμαστε από τα Αγαπημένα της MainActivity;
+        val targetHost = intent.getStringExtra("TARGET_HOST")
+
+        if (targetHost != null) {
+            // Αν πατήσαμε αγαπημένο, βάζουμε το Host του αγαπημένου
+            binding.etHost.setText(targetHost)
+        } else {
+            // Αν ανοίξαμε την οθόνη κανονικά, βάζουμε το τελευταίο χρησιμοποιημένο Host
+            binding.etHost.setText(lastHost)
+        }
+
+        // Συμπλήρωση User/Pass από τα αποθηκευμένα (αν υπάρχουν)
+        binding.etUser.setText(lastUser)
+        binding.etPass.setText(lastPass)
+
         binding.ftpRecyclerView.layoutManager = LinearLayoutManager(this)
 
         binding.btnConnect.setOnClickListener {
@@ -30,12 +52,19 @@ class FtpActivity : AppCompatActivity() {
             val user = binding.etUser.text.toString()
             val pass = binding.etPass.text.toString()
 
+            // Αποθήκευση για την επόμενη φορά
+            prefs.edit().apply {
+                putString("last_host", host)
+                putString("last_user", user)
+                putString("last_pass", pass)
+                apply()
+            }
+
             if (host.isNotEmpty()) connectToFtp(host, user, pass)
         }
     }
 
     private fun connectToFtp(host: String, user: String, pass: String) {
-        // 1. Δείξε ένα μήνυμα αναμονής
         val pd = android.app.ProgressDialog(this)
         pd.setMessage("Σύνδεση στο $host...")
         pd.show()
@@ -54,6 +83,9 @@ class FtpActivity : AppCompatActivity() {
                         binding.loginLayout.visibility = View.GONE
                         binding.ftpRecyclerView.visibility = View.VISIBLE
                         loadFtpFiles("/")
+
+                        // ΕΔΩ ΚΑΛΟΥΜΕ ΤΗΝ ΕΡΩΤΗΣΗ
+                        askToSaveFavorite(host)
                     }
                 } else {
                     runOnUiThread {
@@ -123,15 +155,16 @@ class FtpActivity : AppCompatActivity() {
                     binding.ftpRecyclerView.adapter = FileAdapter(
                         files = fileList,
                         isInSelectionMode = false,
+                        // Μέσα στην runOnUiThread της loadFtpFiles
                         onItemClick = { selectedFile ->
                             if (selectedFile.isDirectory) {
                                 loadFtpFiles(selectedFile.path)
                             } else {
-                                // Χρησιμοποιούμε το όνομα της συνάρτησης που ήδη έχεις ορίσει παρακάτω
                                 AlertDialog.Builder(this)
                                     .setTitle("Λήψη αρχείου")
                                     .setMessage("Θέλετε να κατεβάσετε το ${selectedFile.name};")
                                     .setPositiveButton("Ναι") { _, _ ->
+                                        // ΠΡΟΣΟΧΗ: Κάλεσε τη συνάρτηση με το Progress!
                                         downloadFileWithProgress(selectedFile.path, selectedFile.name)
                                     }
                                     .setNegativeButton("Άκυρο", null)
@@ -156,40 +189,6 @@ class FtpActivity : AppCompatActivity() {
             if (ftpClient.isConnected) {
                 ftpClient.logout()
                 ftpClient.disconnect()
-            }
-        }.start()
-    }
-
-    private fun downloadFile(remoteFilePath: String, fileName: String) {
-        // Ορίζουμε το τοπικό path (φάκελος Downloads)
-        val localFile = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            fileName
-        )
-
-        Thread {
-            try {
-                val outputStream = java.io.FileOutputStream(localFile)
-
-                // Η εντολή retrieveFile κάνει όλη τη δουλειά της μεταφοράς
-                val success = ftpClient.retrieveFile(remoteFilePath, outputStream)
-                outputStream.close()
-
-                runOnUiThread {
-                    if (success) {
-                        Toast.makeText(
-                            this,
-                            "Το αρχείο αποθηκεύτηκε στα λήψεις!",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    } else {
-                        Toast.makeText(this, "Αποτυχία λήψης", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    Toast.makeText(this, "Σφάλμα: ${e.message}", Toast.LENGTH_LONG).show()
-                }
             }
         }.start()
     }
@@ -243,5 +242,29 @@ class FtpActivity : AppCompatActivity() {
                 }
             }
         }.start()
+    }
+
+    private fun askToSaveFavorite(host: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Προσθήκη στα Αγαπημένα")
+            .setMessage("Θέλετε να προσθέσετε το $host στα αγαπημένα σας;")
+            .setPositiveButton("Ναι") { _, _ ->
+                // Χρησιμοποιούμε τα ίδια Preferences με τη MainActivity
+                val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
+                val savedPaths = prefs.getString("paths_ordered", "")
+                val favoritePaths = if (savedPaths.isNullOrEmpty()) mutableListOf<String>()
+                else savedPaths.split("|").toMutableList()
+
+                val ftpPath = "ftp://$host"
+
+                if (!favoritePaths.contains(ftpPath)) {
+                    favoritePaths.add(ftpPath)
+                    // Αποθήκευση στη μορφή που καταλαβαίνει η MainActivity (String με |)
+                    prefs.edit().putString("paths_ordered", favoritePaths.joinToString("|")).apply()
+                    Toast.makeText(this, "Προστέθηκε στα αγαπημένα!", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Όχι", null)
+            .show()
     }
 }
