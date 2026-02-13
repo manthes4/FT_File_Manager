@@ -30,30 +30,60 @@ class FileAdapter(
         return FileViewHolder(view)
     }
 
+    // Συνάρτηση για όμορφη μορφοποίηση μεγέθους
+    private fun formatSize(bytes: Long): String {
+        if (bytes <= 0) return "0 B"
+        val kb = bytes / 1024.0
+        val mb = kb / 1024.0
+        return if (mb >= 1) String.format("%.2f MB", mb) else String.format("%.2f KB", kb)
+    }
+
+    // Συνάρτηση για πληροφορίες φακέλου (αριθμός αρχείων και συνολικό μέγεθος)
+    private fun getFolderInfo(folder: File): Pair<Int, Long> {
+        var totalSize: Long = 0
+        var fileCount = 0
+        folder.listFiles()?.forEach {
+            fileCount++
+            if (it.isFile) totalSize += it.length()
+        }
+        return Pair(fileCount, totalSize)
+    }
+
     override fun onBindViewHolder(holder: FileViewHolder, position: Int) {
         val fileModel = files[position]
-        // Το fileModel.path μπορεί να είναι "ftp://..." ή "/storage/...".
-        // Για την επέκταση χρησιμοποιούμε το όνομα.
+        val file = File(fileModel.path)
         val extension = fileModel.name.substringAfterLast(".", "").lowercase()
 
         holder.name.text = fileModel.name
-        holder.info.text = fileModel.size
 
-        // 1. Καθαρισμός Glide
+        // 1. Καθαρισμός Glide & Διαχείριση Μεγέθους/Πληροφοριών
         Glide.with(holder.itemView.context).clear(holder.icon)
 
-        // 2. Λογική Εικονιδίων
         if (fileModel.isDirectory) {
+            // Εικονίδιο Φακέλου
             holder.icon.setImageResource(R.drawable.ic_folder_yellow)
+
+            // Πληροφορίες Φακέλου (Μόνο για τοπικά αρχεία)
+            if (!fileModel.path.startsWith("ftp://")) {
+                val (count, size) = getFolderInfo(file)
+                holder.info.text = "$count στοιχεία | ${formatSize(size)}"
+            } else {
+                holder.info.text = "Φάκελος FTP"
+            }
         } else {
-            // Αν είναι τοπικό αρχείο ΚΑΙ εικόνα, δείξε Thumbnail
+            // Πληροφορίες Αρχείου (KB/MB)
+            val sizeInBytes = if (!fileModel.path.startsWith("ftp://")) file.length() else 0L
+            // Σημείωση: Στο FTP το μέγεθος θα πρέπει να έρχεται έτοιμο από το fileModel.size αν είναι δυνατόν
+            holder.info.text = if (sizeInBytes > 0) formatSize(sizeInBytes) else fileModel.size
+
+            // 2. Λογική Εικονιδίων Αρχείων
             if (!fileModel.path.startsWith("ftp://") &&
                 extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp")) {
 
                 Glide.with(holder.itemView.context)
-                    .load(File(fileModel.path))
+                    .load(file)
                     .centerCrop()
-                    .placeholder(R.drawable.ic_folder_yellow)
+                    .placeholder(R.drawable.ic_image_placeholder) // Βάλε ένα εικονίδιο για "loading"
                     .into(holder.icon)
             } else {
                 // Στατικά εικονίδια για FTP ή μη-εικόνες
