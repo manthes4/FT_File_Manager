@@ -7,6 +7,9 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import com.bumptech.glide.Glide
+import java.io.File
+import android.webkit.MimeTypeMap
 
 class FileAdapter(
     private val files: List<FileModel>,
@@ -28,42 +31,91 @@ class FileAdapter(
     }
 
     override fun onBindViewHolder(holder: FileViewHolder, position: Int) {
-        val file = files[position]
+        val fileModel = files[position]
+        // Το fileModel.path μπορεί να είναι "ftp://..." ή "/storage/...".
+        // Για την επέκταση χρησιμοποιούμε το όνομα.
+        val extension = fileModel.name.substringAfterLast(".", "").lowercase()
 
-        holder.name.text = file.name
-        holder.info.text = file.size
+        holder.name.text = fileModel.name
+        holder.info.text = fileModel.size
 
-        // Εικονίδια
-        if (file.isDirectory) {
-            holder.icon.setImageResource(android.R.drawable.ic_menu_directions)
+        // 1. Καθαρισμός Glide
+        Glide.with(holder.itemView.context).clear(holder.icon)
+
+        // 2. Λογική Εικονιδίων
+        if (fileModel.isDirectory) {
+            holder.icon.setImageResource(R.drawable.ic_folder_yellow)
         } else {
-            holder.icon.setImageResource(android.R.drawable.ic_menu_agenda)
+            // Αν είναι τοπικό αρχείο ΚΑΙ εικόνα, δείξε Thumbnail
+            if (!fileModel.path.startsWith("ftp://") &&
+                extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp")) {
+
+                Glide.with(holder.itemView.context)
+                    .load(File(fileModel.path))
+                    .centerCrop()
+                    .placeholder(R.drawable.ic_folder_yellow)
+                    .into(holder.icon)
+            } else {
+                // Στατικά εικονίδια για FTP ή μη-εικόνες
+                when (extension) {
+                    "pdf" -> holder.icon.setImageResource(R.drawable.picture_as_pdf_24px)
+                    "txt", "log" -> holder.icon.setImageResource(R.drawable.text_ad_24px)
+                    "zip", "rar", "7z" -> holder.icon.setImageResource(R.drawable.folder_zip_24px)
+                    "mp4", "mkv", "avi" -> holder.icon.setImageResource(R.drawable.video_camera_back_24px)
+                    "mp3", "wav" -> holder.icon.setImageResource(R.drawable.music_note_2_24px)
+                    "apk" -> {
+                        if (!fileModel.path.startsWith("ftp://")) {
+                            try {
+                                val pm = holder.itemView.context.packageManager
+                                val info = pm.getPackageArchiveInfo(fileModel.path, 0)
+
+                                // Χρησιμοποιούμε ?.let για να εκτελεστεί ο κώδικας μόνο αν το info ΚΑΙ το applicationInfo ΔΕΝ είναι null
+                                info?.applicationInfo?.let { appInfo ->
+                                    appInfo.sourceDir = fileModel.path
+                                    appInfo.publicSourceDir = fileModel.path
+
+                                    val iconDrawable = appInfo.loadIcon(pm)
+                                    holder.icon.setImageDrawable(iconDrawable)
+                                } ?: run {
+                                    // Αν το info ή το applicationInfo είναι null, δείξε το default εικονίδιο
+                                    holder.icon.setImageResource(R.drawable.apk_document_24px)
+                                }
+                            } catch (e: Exception) {
+                                holder.icon.setImageResource(R.drawable.apk_document_24px)
+                            }
+                        } else {
+                            holder.icon.setImageResource(R.drawable.apk_document_24px)
+                        }
+                    }
+                    // Προεπιλεγμένο εικονίδιο για άγνωστα αρχεία
+                    else -> holder.icon.setImageResource(R.drawable.apk_document_24px)
+                }
+            }
         }
 
-        // Αλλαγή φόντου αν είναι επιλεγμένο
+        // 3. Selection UI
         holder.itemView.setBackgroundColor(
-            if (file.isSelected) Color.parseColor("#D3D3D3") else Color.TRANSPARENT
+            if (fileModel.isSelected) Color.parseColor("#D3D3D3") else Color.TRANSPARENT
         )
 
-        // Long Click: Ενεργοποιεί το Selection Mode αν δεν είναι ήδη ενεργό
+        // 4. Click Listeners (Long Click & Simple Click)
         holder.itemView.setOnLongClickListener {
             if (!isInSelectionMode) {
-                file.isSelected = true
+                fileModel.isSelected = true
                 isInSelectionMode = true
-                notifyDataSetChanged() // Ενημέρωση όλων για να δείξουν τα backgrounds
-                onItemLongClick(file)
+                notifyDataSetChanged()
+                onItemLongClick(fileModel)
             }
             true
         }
 
-        // Simple Click
         holder.itemView.setOnClickListener {
             if (isInSelectionMode) {
-                file.isSelected = !file.isSelected
+                fileModel.isSelected = !fileModel.isSelected
                 notifyItemChanged(position)
-                onSelectionChanged() // Ενημέρωσε τη MainActivity να μετρήσει τα επιλεγμένα
+                onSelectionChanged()
             } else {
-                onItemClick(file)
+                onItemClick(fileModel)
             }
         }
     }
