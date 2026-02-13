@@ -24,6 +24,7 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import java.io.File
 import kotlinx.coroutines.*
 import java.util.Collections
+import kotlin.jvm.java
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -463,10 +464,6 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent.createChooser(intent, "Share via"))
     }
 
-    private fun openFile(file: File) {
-        Toast.makeText(this, "Άνοιγμα: ${file.name}", Toast.LENGTH_SHORT).show()
-    }
-
     private fun showRenameDialog(fileModel: FileModel) {
         val input = android.widget.EditText(this)
         input.setText(fileModel.name)
@@ -813,5 +810,56 @@ class MainActivity : AppCompatActivity() {
             favoritePaths.clear()
             favoritePaths.addAll(savedPaths.split("|"))
         }
+    }
+
+    private fun openFile(file: File) {
+        val extension = file.extension.lowercase()
+
+        when (extension) {
+            "txt", "log", "java", "py", "xml", "json", "html" -> {
+                val intent = Intent(this, TextEditorActivity::class.java)
+                intent.putExtra("PATH", file.absolutePath)
+                startActivity(intent)
+            }
+            "jpg", "jpeg", "png", "gif", "webp" -> {
+                // Εδώ θα φτιάξεις μια ImageViewActivity αντίστοιχα
+                val intent = Intent(this, ImageViewActivity::class.java)
+                intent.putExtra("PATH", file.absolutePath)
+                startActivity(intent)
+            }
+            "pdf" -> {
+                // Για PDF, αν δεν θες βιβλιοθήκη, η καλύτερη λύση εσωτερικά
+                // είναι το PdfRenderer του Android (θέλει λίγο κώδικα παραπάνω)
+                openPdfInternal(file)
+            }
+            else -> {
+                // Για όλα τα άλλα (mp3, mp4, docx), άνοιγμα με εξωτερική εφαρμογή
+                openFileExternally(file)
+            }
+        }
+    }
+
+    private fun openFileExternally(file: File) {
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this, "${packageName}.provider", file
+            )
+            val extension = file.extension.lowercase()
+            val mimeType = android.webkit.MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(extension) ?: "*/*"
+
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(intent, "Άνοιγμα με:"))
+        } catch (e: Exception) {
+            Toast.makeText(this, "Αποτυχία ανοίγματος: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun openPdfInternal(file: File) {
+        // Προσωρινά τα στέλνουμε έξω μέχρι να φτιάξουμε τον δικό μας Viewer
+        openFileExternally(file)
     }
 }

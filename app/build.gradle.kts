@@ -63,4 +63,6 @@ dependencies {
 
     // FTP Library
     implementation("commons-net:commons-net:3.9.0")
+
+    implementation("com.github.bumptech.glide:glide:5.0.5")
 }
