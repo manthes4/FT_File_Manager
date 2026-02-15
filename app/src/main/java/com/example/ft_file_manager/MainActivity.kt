@@ -198,14 +198,12 @@ class MainActivity : AppCompatActivity() {
         currentPath = directory
         binding.toolbar.title = directory.name.ifEmpty { "Internal Storage" }
 
-        // Χρησιμοποιούμε Coroutine για να τρέξουμε το RootTools
         MainScope().launch {
             val fileList = mutableListOf<FileModel>()
-
-            // Δοκιμάζουμε την κανονική ανάγνωση (Java File API)
             val files = withContext(Dispatchers.IO) { directory.listFiles() }
 
             if (files != null) {
+                // Java File API: Εδώ συνήθως τα Ελληνικά παίζουν σωστά
                 files.forEach {
                     fileList.add(
                         FileModel(
@@ -215,18 +213,26 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
             } else {
-                // ΕΔΩ χρησιμοποιούμε το ΝΕΟ RootTools
-                val output = RootTools.getOutput("ls -F '${directory.absolutePath}'")
+                // ROOT MODE: Εδώ χρειαζόμαστε το "φιλτράρισμα" για τα Ελληνικά
+                // Προσθέτουμε export LANG και παραμέτρους στο ls
+                val cmd = "export LANG=en_US.UTF-8; ls -F -N --color=never '${directory.absolutePath}'"
+                val output = RootTools.getOutput(cmd)
+
                 if (output.isNotEmpty() && !output.contains("Error:")) {
                     output.split("\n").forEach { line ->
                         val name = line.trim()
                         if (name.isNotEmpty()) {
+                            // Το ls -F βάζει / στο τέλος των φακέλων
                             val isDir = name.endsWith("/")
                             val cleanName = if (isDir) name.dropLast(1) else name
+
                             fileList.add(
                                 FileModel(
-                                    cleanName, "${directory.absolutePath}/$cleanName", isDir,
-                                    if (isDir) "Φάκελος" else "System File", true
+                                    cleanName,
+                                    "${directory.absolutePath}/$cleanName".replace("//", "/"),
+                                    isDir,
+                                    if (isDir) "Φάκελος" else "System File",
+                                    true
                                 )
                             )
                         }
@@ -234,7 +240,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
+            // Ταξινόμηση (Locale-aware για να μπαίνουν τα Ελληνικά σε σωστή αλφαβητική σειρά)
+            fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }
+                .thenBy { it.name.lowercase() })
+
             fullFileList = fileList
             updateAdapter(fileList)
         }

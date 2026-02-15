@@ -38,7 +38,10 @@ object RootTools {
             val process = Runtime.getRuntime().exec(getSuCommand())
             val os = DataOutputStream(process.outputStream)
 
-            os.writeBytes("$command\n")
+            // Στέλνουμε την εντολή ΚΑΙ το \n μαζί σε UTF-8
+            val fullCommand = "$command\n"
+            os.write(fullCommand.toByteArray(Charsets.UTF_8))
+
             os.writeBytes("exit\n")
             os.flush()
 
@@ -59,12 +62,15 @@ object RootTools {
             val process = Runtime.getRuntime().exec(getSuCommand())
             val os = DataOutputStream(process.outputStream)
 
-            // Το 2>&1 στέλνει τα σφάλματα στο ίδιο κανάλι με το αποτέλεσμα
-            os.writeBytes("$command 2>&1\n")
+            // Στέλνουμε την εντολή με UTF-8
+            val fullCommand = "$command 2>&1\n"
+            os.write(fullCommand.toByteArray(Charsets.UTF_8))
+
             os.writeBytes("exit\n")
             os.flush()
 
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            // ΚΡΙΣΙΜΟ: Ορίζουμε Charsets.UTF_8 στον Reader
+            val reader = BufferedReader(InputStreamReader(process.inputStream, Charsets.UTF_8))
             var line: String?
             while (reader.readLine().also { line = it } != null) {
                 output.append(line).append("\n")
