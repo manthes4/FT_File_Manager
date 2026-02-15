@@ -309,72 +309,70 @@ class MainActivity : AppCompatActivity() {
         val filesToProcess = if (fileToMove != null) listOf(fileToMove!!) else bulkFilesToMove
         if (filesToProcess.isEmpty()) return
 
-        // Χρησιμοποιούμε Coroutine γιατί το RootTools είναι suspend
         MainScope().launch {
-            binding.progressBar.visibility = View.VISIBLE // Εμφάνιση
+            binding.progressBar.visibility = View.VISIBLE
             var allSuccess = true
 
-            // Έλεγχος αν ο προορισμός είναι στο σύστημα
-            val isSystemTarget = currentPath.absolutePath.startsWith("/system") ||
-                    currentPath.absolutePath.startsWith("/vendor")
+            // 1. Μετατροπή του currentPath στην πραγματική Root διαδρομή
+            val rawDestDir = currentPath.absolutePath
+            val realDestDir = if (rawDestDir.startsWith("/storage/emulated/0")) {
+                rawDestDir.replace("/storage/emulated/0", "/data/media/0")
+            } else {
+                rawDestDir
+            }
+
+            // 2. Έλεγχος αν γράφουμε σε σύστημα
+            val isSystemTarget = realDestDir.startsWith("/system") ||
+                    realDestDir.startsWith("/vendor") ||
+                    realDestDir == "/"
 
             if (isSystemTarget) {
-                val unlocked = RootTools.unlockSystem()
-                if (!unlocked) {
-                    Toast.makeText(
-                        this@MainActivity,
-                        "Αποτυχία ξεκλειδώματος συστήματος (Read-Only)",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    // Συνεχίζουμε παρ' όλα αυτά, μήπως και πέτυχε αθόρυβα
-                }
+                RootTools.unlockSystem()
             }
 
             withContext(Dispatchers.IO) {
                 filesToProcess.forEach { model ->
-                    val source = File(model.path)
-                    val dest = File(currentPath, source.name)
+                    // Μετατροπή και της πηγής (source) σε real path αν χρειάζεται
+                    val rawSourcePath = model.path
+                    val realSourcePath = if (rawSourcePath.startsWith("/storage/emulated/0")) {
+                        rawSourcePath.replace("/storage/emulated/0", "/data/media/0")
+                    } else {
+                        rawSourcePath
+                    }
+
+                    val fileName = File(rawSourcePath).name
+                    val finalDestPath = "$realDestDir/$fileName".replace("//", "/")
 
                     try {
-                        if (isCutOperation) {
-                            // Χρήση RootTools για μετακίνηση στο σύστημα
-                            val moved = if (isSystemTarget || model.isRoot) {
-                                RootTools.executeSilent("mv '${source.absolutePath}' '${dest.absolutePath}'")
-                            } else {
-                                source.renameTo(dest)
-                            }
-                            if (!moved) allSuccess = false
+                        val command = if (isCutOperation) {
+                            "mv '$realSourcePath' '$finalDestPath'"
                         } else {
-                            // Χρήση RootTools για αντιγραφή στο σύστημα
-                            val copied = if (isSystemTarget || model.isRoot) {
-                                RootTools.executeSilent("cp -r '${source.absolutePath}' '${dest.absolutePath}'")
-                            } else {
-                                source.copyRecursively(dest, true)
-                            }
-                            if (!copied) allSuccess = false
+                            "cp -r '$realSourcePath' '$finalDestPath'"
                         }
+
+                        // Εκτέλεση μέσω RootTools
+                        val result = RootTools.executeSilent(command)
+                        if (!result) allSuccess = false
+
                     } catch (e: Exception) {
                         allSuccess = false
                     }
                 }
             }
 
-            // ΕΔΩ ΠΡΟΣΘΕΤΟΥΜΕ ΤΟ LOCK
             if (isSystemTarget) {
                 RootTools.lockSystem()
             }
 
-            binding.progressBar.visibility = View.GONE // Εξαφάνιση
-            loadFiles(currentPath)
-
-            // Επιστροφή στο UI
+            binding.progressBar.visibility = View.GONE
             loadFiles(currentPath)
             binding.fabPaste.hide()
             fileToMove = null
             bulkFilesToMove = emptyList()
+
             Toast.makeText(
                 this@MainActivity,
-                if (allSuccess) "Η αντιγραφή ολοκληρώθηκε!" else "Αποτυχία σε κάποια αρχεία",
+                if (allSuccess) "Η επιχείρηση ολοκληρώθηκε!" else "Αποτυχία σε κάποια αρχεία",
                 Toast.LENGTH_SHORT
             ).show()
         }
@@ -431,21 +429,33 @@ class MainActivity : AppCompatActivity() {
             .setMessage("Θέλετε να διαγράψετε το ${file.name};")
             .setPositiveButton("Ναι") { _, _ ->
                 MainScope().launch {
-                    val isSystem =
-                        file.path.startsWith("/system") || file.path.startsWith("/vendor")
+                    // 1. Μετατροπή path για παράκαμψη του Scoped Storage
+                    val realPath = if (file.path.startsWith("/storage/emulated/0")) {
+                        file.path.replace("/storage/emulated/0", "/data/media/0")
+                    } else {
+                        file.path
+                    }
+
+                    val isSystem = realPath.startsWith("/system") ||
+                            realPath.startsWith("/vendor") ||
+                            realPath == "/"
+
                     if (isSystem) RootTools.unlockSystem()
 
                     val success = withContext(Dispatchers.IO) {
-                        if (file.isRoot || isSystem) {
-                            RootTools.executeSilent("rm -rf '${file.path}'")
-                        } else {
-                            File(file.path).deleteRecursively()
-                        }
+                        // Χρησιμοποιούμε ΠΑΝΤΑ RootTools για εγγυημένη διαγραφή
+                        // σε Android 14 και φακέλους όπως το Android/data
+                        RootTools.executeSilent("rm -rf '$realPath'")
                     }
 
-                    if (success) loadFiles(currentPath)
-                    else Toast.makeText(this@MainActivity, "Αποτυχία διαγραφής", Toast.LENGTH_SHORT)
-                        .show()
+                    if (isSystem) RootTools.lockSystem()
+
+                    if (success) {
+                        loadFiles(currentPath)
+                        Toast.makeText(this@MainActivity, "Διαγράφηκε", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(this@MainActivity, "Αποτυχία διαγραφής", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             .setNegativeButton("Όχι", null)
@@ -474,20 +484,30 @@ class MainActivity : AppCompatActivity() {
                 val newName = input.text.toString()
                 if (newName.isNotEmpty()) {
                     MainScope().launch {
-                        val isSystem =
-                            fileModel.path.startsWith("/system") || fileModel.path.startsWith("/vendor")
+                        // 1. Μετατροπή της παλιάς διαδρομής σε Real Root Path
+                        val oldPathReal = if (fileModel.path.startsWith("/storage/emulated/0")) {
+                            fileModel.path.replace("/storage/emulated/0", "/data/media/0")
+                        } else {
+                            fileModel.path
+                        }
+
+                        // 2. Υπολογισμός της νέας διαδρομής (στο ίδιο parent folder)
+                        val parentFile = File(oldPathReal).parent ?: ""
+                        val newPathReal = "$parentFile/$newName".replace("//", "/")
+
+                        // 3. Έλεγχος για System Unlock
+                        val isSystem = oldPathReal.startsWith("/system") ||
+                                oldPathReal.startsWith("/vendor") ||
+                                oldPathReal == "/"
+
                         if (isSystem) RootTools.unlockSystem()
 
-                        val parentPath = File(fileModel.path).parent
-                        val newPath = "$parentPath/$newName"
-
                         val success = withContext(Dispatchers.IO) {
-                            if (fileModel.isRoot || isSystem) {
-                                RootTools.executeSilent("mv '${fileModel.path}' '$newPath'")
-                            } else {
-                                File(fileModel.path).renameTo(File(newPath))
-                            }
+                            // Χρησιμοποιούμε ΠΑΝΤΑ mv μέσω Root για να είμαστε σίγουροι
+                            RootTools.executeSilent("mv '$oldPathReal' '$newPathReal'")
                         }
+
+                        if (isSystem) RootTools.lockSystem()
 
                         if (success) {
                             loadFiles(currentPath)
@@ -557,23 +577,27 @@ class MainActivity : AppCompatActivity() {
                     val allSuccess = withContext(Dispatchers.IO) {
                         var success = true
                         selectedFiles.forEach { file ->
-                            val result = if (file.isRoot || isSystem) {
-                                RootTools.executeSilent("rm -rf '${file.path}'")
+                            // Μετατροπή path για Root
+                            val realPath = if (file.path.startsWith("/storage/emulated/0")) {
+                                file.path.replace("/storage/emulated/0", "/data/media/0")
                             } else {
-                                File(file.path).deleteRecursively()
+                                file.path
                             }
+
+                            // Εκτέλεση rm -rf μέσω Root
+                            val result = RootTools.executeSilent("rm -rf '$realPath'")
                             if (!result) success = false
                         }
                         success
                     }
 
+                    if (isSystem) RootTools.lockSystem()
+
                     exitSelectionMode()
                     loadFiles(currentPath)
-                    Toast.makeText(
-                        this@MainActivity,
+                    Toast.makeText(this@MainActivity,
                         if (allSuccess) "Διαγράφηκαν επιτυχώς" else "Κάποιες διαγραφές απέτυχαν",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                        Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton("Όχι", null)
@@ -605,40 +629,35 @@ class MainActivity : AppCompatActivity() {
                 val name = input.text.toString()
                 if (name.isNotEmpty()) {
                     MainScope().launch {
-                        val isSystemPath = currentPath.absolutePath.startsWith("/system") ||
-                                currentPath.absolutePath.startsWith("/vendor") ||
-                                currentPath.absolutePath == "/"
+                        // 1. Μετατροπή της εικονικής διαδρομής στην πραγματική διαδρομή Root
+                        val rawPath = "${currentPath.absolutePath}/$name".replace("//", "/")
+                        val realRootPath = if (rawPath.startsWith("/storage/emulated/0")) {
+                            rawPath.replace("/storage/emulated/0", "/data/media/0")
+                        } else {
+                            rawPath
+                        }
 
                         val success = withContext(Dispatchers.IO) {
                             try {
-                                if (isSystemPath) {
-                                    // Ξεκλείδωμα αν είναι σύστημα
-                                    RootTools.unlockSystem()
+                                // 2. Πάντα ξεκλείδωμα (για σιγουριά)
+                                RootTools.unlockSystem()
 
-                                    // Δημιουργία μέσω Root εντολών Linux
-                                    val fullPath =
-                                        "${currentPath.absolutePath}/$name".replace("//", "/")
-                                    val command =
-                                        if (isDirectory) "mkdir '$fullPath'" else "touch '$fullPath'"
-                                    RootTools.executeSilent(command)
-                                } else {
-                                    // Κανονική δημιουργία για εσωτερική μνήμη
-                                    val newItem = File(currentPath, name)
-                                    if (isDirectory) newItem.mkdir() else newItem.createNewFile()
-                                }
+                                // 3. Χρήση Root εντολών παντού για να παρακάμψουμε το Scoped Storage
+                                val command = if (isDirectory) "mkdir -p '$realRootPath'" else "touch '$realRootPath'"
+
+                                // Εκτέλεση μέσω της νέας RootTools που φτιάξαμε
+                                RootTools.executeSilent(command)
                             } catch (e: Exception) {
+                                Log.e("FILE_MANAGER", "Error: ${e.message}")
                                 false
                             }
                         }
 
                         if (success) {
                             loadFiles(currentPath)
+                            Toast.makeText(this@MainActivity, "Επιτυχία!", Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(
-                                this@MainActivity,
-                                "Αποτυχία δημιουργίας (Root;)",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            Toast.makeText(this@MainActivity, "Αποτυχία δημιουργίας", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }

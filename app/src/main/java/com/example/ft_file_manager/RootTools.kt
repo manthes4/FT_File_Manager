@@ -3,21 +3,41 @@ package com.example.ft_file_manager
 import java.io.DataOutputStream
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 object RootTools {
 
     /**
-     * Εκτελεί μια εντολή root και επιστρέφει true αν πέτυχε.
-     * Ιδανικό για rm, cp, mv, chmod.
+     * Ανιχνεύει την καλύτερη διαδρομή για το SU.
+     * Στο Android 14, η πλήρης διαδρομή του Magisk είναι συχνά απαραίτητη.
+     */
+    private fun getSuCommand(): String {
+        val paths = arrayOf(
+            "/data/adb/magisk/magisk", // Η διαδρομή που δούλεψε στο Android 14 σου
+            "/system/xbin/su",
+            "/system/bin/su",
+            "/sbin/su"
+        )
+        for (path in paths) {
+            if (File(path).exists()) {
+                // Αν είναι το magisk binary, επιστρέφουμε "διαδρομή su", αλλιώς σκέτο το path
+                return if (path.contains("magisk")) "$path su" else path
+            }
+        }
+        return "su" // Fallback αν δεν βρεθεί τίποτα
+    }
+
+    /**
+     * Εκτελεί μια εντολή root "σιωπηλά" (π.χ. rm, cp, chmod).
+     * Επιστρέφει true αν το exit value είναι 0.
      */
     suspend fun executeSilent(command: String): Boolean = withContext(Dispatchers.IO) {
         try {
-            val process = Runtime.getRuntime().exec("su")
+            val process = Runtime.getRuntime().exec(getSuCommand())
             val os = DataOutputStream(process.outputStream)
 
-            // Remount system αν χρειάζεται (προαιρετικά μπορείς να το καλείς ξεχωριστά)
             os.writeBytes("$command\n")
             os.writeBytes("exit\n")
             os.flush()
@@ -30,14 +50,17 @@ object RootTools {
     }
 
     /**
-     * Εκτελεί εντολή root και επιστρέφει το αποτέλεσμα ως String (π.χ. για ls ή cat).
+     * Εκτελεί εντολή root και επιστρέφει το αποτέλεσμα (stdout).
+     * Προστέθηκε το 2>&1 για να πιάνουμε και τα μηνύματα σφάλματος.
      */
     suspend fun getOutput(command: String): String = withContext(Dispatchers.IO) {
         val output = StringBuilder()
         try {
-            val process = Runtime.getRuntime().exec("su")
+            val process = Runtime.getRuntime().exec(getSuCommand())
             val os = DataOutputStream(process.outputStream)
-            os.writeBytes("$command\n")
+
+            // Το 2>&1 στέλνει τα σφάλματα στο ίδιο κανάλι με το αποτέλεσμα
+            os.writeBytes("$command 2>&1\n")
             os.writeBytes("exit\n")
             os.flush()
 
@@ -54,28 +77,37 @@ object RootTools {
     }
 
     /**
-     * Ξεκλειδώνει το σύστημα αρχείων για εγγραφή.
+     * Ξεκλειδώνει το σύστημα αρχείων για εγγραφή (RW).
      */
     suspend fun unlockSystem(): Boolean {
-        // Λίστα με τις πιο συνηθισμένες εντολές remount για διαφορετικές εκδόσεις Android
         val mountCommands = arrayOf(
-            "mount -o remount,rw /",                 // Η κλασική (CoreELEC / Παλιά Android)
-            "mount -o remount,rw /system",          // Για τυπικά Android 7-9
-            "mount -o remount,rw /dev/block/by-name/system /system", // Πιο επιθετική
-            "toybox mount -o remount,rw /",         // Χρήση toybox αν το mount είναι περιορισμένο
-            "busybox mount -o remount,rw /system"   // Χρήση busybox αν υπάρχει
+            "mount -o remount,rw /",
+            "mount -o remount,rw /system",
+            "mount -o remount,rw /data/media/0", // Ξεκλείδωμα για Android/data πρόσβαση
+            "toybox mount -o remount,rw /",
+            "busybox mount -o remount,rw /"
         )
 
         for (cmd in mountCommands) {
             if (executeSilent(cmd)) {
                 android.util.Log.d("ROOT_TOOLS", "System unlocked with: $cmd")
-                return true // Αν πετύχει έστω και μία, σταματάμε και επιστρέφουμε true
+                return true
             }
         }
-
-        android.util.Log.e("ROOT_TOOLS", "All unlock attempts failed!")
         return false
     }
 
-    suspend fun lockSystem(): Boolean = executeSilent("mount -o remount,ro /")
+    /**
+     * Κλειδώνει το σύστημα αρχείων (Read-Only).
+     */
+    suspend fun lockSystem(): Boolean {
+        val lockCommands = arrayOf(
+            "mount -o remount,ro /",
+            "mount -o remount,ro /system"
+        )
+        for (cmd in lockCommands) {
+            if (executeSilent(cmd)) return true
+        }
+        return false
+    }
 }
