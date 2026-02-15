@@ -286,6 +286,10 @@ class MainActivity : AppCompatActivity() {
             isCutOperation = false
             binding.fabPaste.show()
             dialog.dismiss()
+
+            // Μεταφορά στον αρχικό κατάλογο της εσωτερικής μνήμης
+
+            loadFiles(Environment.getExternalStorageDirectory())
         }
 
         view.findViewById<TextView>(R.id.btnCut).setOnClickListener {
@@ -293,6 +297,10 @@ class MainActivity : AppCompatActivity() {
             isCutOperation = true
             binding.fabPaste.show()
             dialog.dismiss()
+
+            // Μεταφορά στον αρχικό κατάλογο της εσωτερικής μνήμης
+
+            loadFiles(Environment.getExternalStorageDirectory())
         }
 
         view.findViewById<TextView>(R.id.btnDelete).setOnClickListener {
@@ -625,6 +633,9 @@ class MainActivity : AppCompatActivity() {
         ).show()
         exitSelectionMode()
         binding.fabPaste.show()
+
+        // Μεταφορά στον αρχικό κατάλογο της εσωτερικής μνήμης
+        loadFiles(Environment.getExternalStorageDirectory())
     }
 
     private fun showCreateItemDialog(isDirectory: Boolean) {
