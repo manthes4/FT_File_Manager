@@ -18,6 +18,18 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    packaging {
+        resources {
+            // Αυτό λέει στο Gradle να αγνοήσει τα διπλότυπα αρχεία MANIFEST.MF
+            excludes += "/META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+
+            // Προληπτικά, μπορείς να προσθέσεις και αυτά αν σου βγάλει κι άλλα λάθη
+            excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/LICENSE*"
+            excludes += "META-INF/NOTICE*"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -50,6 +62,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    implementation(libs.identity.jvm)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -67,4 +80,16 @@ dependencies {
     implementation("commons-net:commons-net:3.9.0")
 
     implementation("com.github.bumptech.glide:glide:5.0.5")
+
+    // Για SMB (Samba/Windows Share)
+    implementation("com.hierynomus:smbj:0.14.0")
+
+    // Για SFTP (SSH)
+    implementation("com.jcraft:jsch:0.1.55")
+
+    implementation("com.rapid7.client:dcerpc:0.12.13")
+    implementation("org.slf4j:slf4j-simple:1.7.36")
+    implementation("com.hierynomus:asn-one:0.6.0")
+
+    implementation("org.codelibs:jcifs:3.0.2")
 }

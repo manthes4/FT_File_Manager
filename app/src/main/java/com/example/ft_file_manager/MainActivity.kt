@@ -187,11 +187,16 @@ class MainActivity : AppCompatActivity() {
                 R.id.nav_internal -> loadFiles(Environment.getExternalStorageDirectory())
                 R.id.nav_root -> loadFiles(File("/"))
                 R.id.nav_ftp -> startActivity(Intent(this, FtpActivity::class.java))
+
+                // Η ΝΕΑ ΠΡΟΣΘΗΚΗ ΕΔΩ:
+                R.id.nav_network -> {
+                    val intent = Intent(this, NetworkClientActivity::class.java)
+                    startActivity(intent)
+                }
+
                 R.id.nav_external -> {
                     val externalDirs = getExternalFilesDirs(null)
-                    // Το dirs[0] είναι η εσωτερική μνήμη, το dirs[1] (αν υπάρχει) είναι η SD Card
                     if (externalDirs.size > 1 && externalDirs[1] != null) {
-                        // Παίρνουμε το root της SD Card (πριν το /Android/data/...)
                         val sdCardPath = externalDirs[1].absolutePath.split("/Android")[0]
                         loadFiles(File(sdCardPath))
                     } else {

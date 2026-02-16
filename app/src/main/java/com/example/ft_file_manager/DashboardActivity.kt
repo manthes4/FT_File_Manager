@@ -49,6 +49,9 @@ class DashboardActivity : AppCompatActivity() {
                 R.id.nav_ftp -> {
                     startActivity(Intent(this, FtpActivity::class.java))
                 }
+                R.id.nav_network -> {
+                    startActivity(Intent(this, NetworkClientActivity::class.java))
+                }
                 R.id.nav_external -> {
                     val sdPath = getExternalSDPath()
                     if (sdPath != null) {
