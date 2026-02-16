@@ -165,7 +165,10 @@ class FtpActivity : AppCompatActivity() {
                                     .setMessage("Θέλετε να κατεβάσετε το ${selectedFile.name};")
                                     .setPositiveButton("Ναι") { _, _ ->
                                         // ΠΡΟΣΟΧΗ: Κάλεσε τη συνάρτηση με το Progress!
-                                        downloadFileWithProgress(selectedFile.path, selectedFile.name)
+                                        downloadFileWithProgress(
+                                            selectedFile.path,
+                                            selectedFile.name
+                                        )
                                     }
                                     .setNegativeButton("Άκυρο", null)
                                     .show()
@@ -249,27 +252,39 @@ class FtpActivity : AppCompatActivity() {
             .setTitle("Προσθήκη στα Αγαπημένα")
             .setMessage("Θέλετε να προσθέσετε το $host στα αγαπημένα σας;")
             .setPositiveButton("Ναι") { _, _ ->
-                // Χρησιμοποιούμε τα ίδια Preferences με τη MainActivity
-                val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
-                val savedPaths = prefs.getString("paths_ordered", "")
+                // 1. Φόρτωση υπαρχόντων Favorites
+                val prefsFav = getSharedPreferences("favorites", MODE_PRIVATE)
+                val savedPaths = prefsFav.getString("paths_ordered", "")
                 val favoritePaths = if (savedPaths.isNullOrEmpty()) mutableListOf<String>()
                 else savedPaths.split("|").toMutableList()
 
-                // Μέσα στην askToSaveFavorite της FtpActivity
                 val ftpPath = "ftp://$host"
-                val entryToSave = "$host*$ftpPath" // Το όνομα θα είναι το host, και το path το ftp://host
+                val entryToSave = "$host*$ftpPath"
 
+                // Έλεγχος αν υπάρχει ήδη
                 if (!favoritePaths.any { it.endsWith("*$ftpPath") }) {
                     favoritePaths.add(entryToSave)
-                    // Σώζουμε στα prefs "favorites" με κλειδί "paths_ordered"
-                    prefs.edit().putString("paths_ordered", favoritePaths.joinToString("|")).apply()
-                }
 
-                if (!favoritePaths.contains(ftpPath)) {
-                    favoritePaths.add(ftpPath)
-                    // Αποθήκευση στη μορφή που καταλαβαίνει η MainActivity (String με |)
-                    prefs.edit().putString("paths_ordered", favoritePaths.joinToString("|")).apply()
-                    Toast.makeText(this, "Προστέθηκε στα αγαπημένα!", Toast.LENGTH_SHORT).show()
+                    // 2. Αποθήκευση στα Favorites (για το Drawer)
+                    val newFavoritesString = favoritePaths.joinToString("|")
+                    prefsFav.edit().putString("paths_ordered", newFavoritesString).apply()
+
+                    // 3. Αποθήκευση στο Dashboard (ΣΥΓΧΡΟΝΙΣΜΟΣ)
+                    val prefsDash = getSharedPreferences("dashboard_pins", MODE_PRIVATE)
+                    val currentDashString = prefsDash.getString("paths", "") ?: ""
+                    val currentDashList =
+                        currentDashString.split("|").filter { it.isNotEmpty() }.toMutableList()
+
+                    // Προσθήκη στο Dashboard μόνο αν δεν υπάρχει ήδη εκεί
+                    if (!currentDashList.contains(entryToSave)) {
+                        currentDashList.add(entryToSave)
+                        prefsDash.edit().putString("paths", currentDashList.joinToString("|"))
+                            .apply()
+                    }
+
+                    Toast.makeText(this, "Προστέθηκε παντού!", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "Υπάρχει ήδη στα αγαπημένα", Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton("Όχι", null)

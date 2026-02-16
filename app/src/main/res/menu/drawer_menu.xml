@@ -1,8 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
-    <group android:checkableBehavior="single">
-        <item android:id="@+id/nav_internal" android:title="Internal Storage" android:icon="@android:drawable/ic_dialog_info" />
-        <item android:id="@+id/nav_root" android:title="Root Folder" android:icon="@android:drawable/ic_lock_lock" />
-        <item android:id="@+id/nav_external" android:title="SD Card" android:icon="@android:drawable/ic_menu_save" />
-        <item android:id="@+id/nav_ftp" android:title="FTP Servers" android:icon="@android:drawable/ic_menu_share" />
+
+    <group android:id="@+id/group_base" android:checkableBehavior="single">
+        <item
+            android:id="@+id/nav_internal"
+            android:title="Internal Storage"
+            android:icon="@android:drawable/ic_dialog_info" />
+        <item
+            android:id="@+id/nav_root"
+            android:title="Root Folder"
+            android:icon="@android:drawable/ic_lock_lock" />
+        <item
+            android:id="@+id/nav_external"
+            android:title="SD Card"
+            android:icon="@android:drawable/ic_menu_save" />
+        <item
+            android:id="@+id/nav_ftp"
+            android:title="FTP Servers"
+            android:icon="@android:drawable/ic_menu_share" />
     </group>
+
+    <item android:title="Favorites">
+        <menu>
+            <group android:id="@+id/group_favorites" />
+        </menu>
+    </item>
+
 </menu>

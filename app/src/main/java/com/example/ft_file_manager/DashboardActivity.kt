@@ -4,6 +4,8 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Environment
 import android.os.StatFs
+import android.view.View
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.GridLayoutManager
@@ -23,28 +25,63 @@ class DashboardActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_dashboard)
 
+        // 1. Αρχικοποίηση των Views για το Drawer και την Toolbar
+        val toolbar = findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.dashboardToolbar)
+        val drawerLayout = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
+        val navigationView = findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
+
+        // 2. Ρύθμιση Toolbar Navigation (Άνοιγμα Συρταριού)
+        toolbar.setNavigationOnClickListener {
+            drawerLayout.openDrawer(androidx.core.view.GravityCompat.START)
+        }
+
+        // 3. Διαχείριση κλικ στο μενού του Drawer
+        navigationView.setNavigationItemSelectedListener { item ->
+            when (item.itemId) {
+                R.id.nav_internal -> {
+                    // Είσαι ήδη στο Dashboard, απλά κλείσε το συρτάρι
+                }
+                R.id.nav_root -> {
+                    val intent = Intent(this, MainActivity::class.java)
+                    intent.putExtra("START_PATH", "/")
+                    startActivity(intent)
+                }
+                R.id.nav_ftp -> {
+                    startActivity(Intent(this, FtpActivity::class.java))
+                }
+                R.id.nav_external -> {
+                    val sdPath = getExternalSDPath()
+                    if (sdPath != null) {
+                        val intent = Intent(this, MainActivity::class.java)
+                        intent.putExtra("START_PATH", sdPath)
+                        startActivity(intent)
+                    } else {
+                        Toast.makeText(this, "Η SD Card δεν βρέθηκε", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            drawerLayout.closeDrawers()
+            true
+        }
+
+        // 4. Ρύθμιση RecyclerView και LayoutManager
         recyclerView = findViewById(R.id.dashboardRecyclerView)
 
-        // Ρύθμιση Grid: Οι μεγάλες κάρτες (Storage) πιάνουν 2 στήλες, οι μικρές (Pins) πιάνουν 1.
-        // Ορίζουμε 4 στήλες ως βάση
-        // Ορίζουμε 6 στήλες ως βάση (το ελάχιστο κοινό πολλαπλάσιο για 2 και 3)
+        // Βάση 6: 2 μεγάλες κάρτες (3+3) ή 3 μικρές (2+2+2) ανά σειρά
         val layoutManager = GridLayoutManager(this, 6)
-
         layoutManager.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
             override fun getSpanSize(position: Int): Int {
-                return if (adapter.getItemViewType(position) == 1) {
-                    // TYPE_STORAGE: Κάθε κάρτα πιάνει 3 στήλες (6 / 3 = 2 κάρτες ανά σειρά)
-                    3
-                } else {
-                    // TYPE_PINNED: Κάθε κάρτα πιάνει 2 στήλες (6 / 2 = 3 κάρτες ανά σειρά)
-                    2
+                // Αν είναι ο τίτλος (Header ID 10) πιάνει 6 στήλες, αλλιώς 3 ή 2
+                return when (adapter.getItemViewType(position)) {
+                    1 -> 3  // Storage
+                    10 -> 6 // Header
+                    else -> 2 // Pinned Favorites
                 }
             }
         }
-
         recyclerView.layoutManager = layoutManager
 
-        // Αρχικοποίηση Adapter με Click και Long Click
+        // 5. Αρχικοποίηση Adapter
         adapter = DashboardAdapter(storageItems,
             { item -> onItemClick(item) },
             { item -> onLongClick(item) }
@@ -52,9 +89,53 @@ class DashboardActivity : AppCompatActivity() {
         recyclerView.adapter = adapter
     }
 
+    private fun updateDrawerMenu() {
+        val navigationView = findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
+        val menu = navigationView.menu
+        menu.removeGroup(R.id.group_favorites) // Καθαρισμός
+
+        val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
+        val savedPaths = prefs.getString("paths_ordered", "") ?: ""
+
+        if (savedPaths.isNotEmpty()) {
+            savedPaths.split("|").forEach { entry ->
+                val parts = entry.split("*")
+                if (parts.size == 2) {
+                    val displayName = parts[0]
+                    val realPath = parts[1]
+
+                    val menuItem = menu.add(R.id.group_favorites, android.view.View.generateViewId(), 100, displayName)
+
+                    // ΕΛΕΓΧΟΣ: Αν είναι FTP βάλε το εικονίδιο share/ftp, αλλιώς folder
+                    if (realPath.startsWith("ftp://")) {
+                        menuItem.setIcon(android.R.drawable.ic_menu_share) // Ή το δικό σου ic_ftp
+                    } else {
+                        menuItem.setIcon(R.drawable.ic_folder_yellow)
+                    }
+
+                    menuItem.setOnMenuItemClickListener {
+                        if (realPath.startsWith("ftp://")) {
+                            // Αν είναι FTP, άνοιξε την FtpActivity
+                            val host = realPath.replace("ftp://", "")
+                            val intent = Intent(this, FtpActivity::class.java)
+                            intent.putExtra("TARGET_HOST", host)
+                            startActivity(intent)
+                        } else {
+                            // Αν είναι φάκελος, κάλεσε την openPath που ήδη έχεις
+                            openPath(realPath)
+                        }
+                        true
+                    }
+                }
+            }
+        }
+    }
+
+    // Μην ξεχάσεις να την καλέσεις στην onResume!
     override fun onResume() {
         super.onResume()
-        setupItems() // Ανανέωση δεδομένων κάθε φορά που επιστρέφουμε
+        setupItems()
+        updateDrawerMenu() // <--- Προσθήκη εδώ
     }
 
     private fun setupItems() {
@@ -73,20 +154,23 @@ class DashboardActivity : AppCompatActivity() {
         storageItems.add(DashboardItem(4, "FTP Server", null, R.drawable.ic_ftp))
 
         // 2. Προσθήκη Pinned Φακέλων (ID 5) - Μόνο για το Dashboard
-        val prefs = getSharedPreferences("dashboard_pins", MODE_PRIVATE)
-        val savedPins = prefs.getString("paths", "") ?: ""
+        // 2. Προσθήκη Pinned Φακέλων
+        val prefsDash = getSharedPreferences("dashboard_pins", MODE_PRIVATE)
+        var savedPins = prefsDash.getString("paths", "") ?: ""
+
+// ΑΝ ΕΙΝΑΙ ΑΔΕΙΟ: Διάβασε από τα favorites του Drawer για να μην είναι κενό την πρώτη φορά
+        if (savedPins.isEmpty()) {
+            val prefsFav = getSharedPreferences("favorites", MODE_PRIVATE)
+            savedPins = prefsFav.getString("paths_ordered", "") ?: ""
+            // Προαιρετικά: Σώσε τα αμέσως στα pins για να γίνει ο συγχρονισμός
+            prefsDash.edit().putString("paths", savedPins).apply()
+        }
 
         if (savedPins.isNotEmpty()) {
             savedPins.split("|").forEach { entry ->
                 val parts = entry.split("*")
-                if (parts.size == 2) {
-                    val folderName = parts[0]
-                    val path = parts[1]
-
-                    // Εμφάνιση μόνο αν ο φάκελος υπάρχει ακόμα στη μνήμη
-                    if (File(path).exists()) {
-                        storageItems.add(DashboardItem(5, folderName, path, R.drawable.ic_folder_yellow))
-                    }
+                if (parts.size == 2 && File(parts[1]).exists()) {
+                    storageItems.add(DashboardItem(5, parts[0], parts[1], R.drawable.ic_folder_yellow))
                 }
             }
         }
@@ -95,6 +179,12 @@ class DashboardActivity : AppCompatActivity() {
         storageItems.forEach { updateSpaceInfo(it) }
 
         adapter.notifyDataSetChanged()
+    }
+
+    private fun openPath(path: String) {
+        val intent = Intent(this, MainActivity::class.java)
+        intent.putExtra("START_PATH", path)
+        startActivity(intent)
     }
 
     private fun updateSpaceInfo(item: DashboardItem) {
