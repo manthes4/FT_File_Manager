@@ -150,7 +150,8 @@ class MainActivity : AppCompatActivity() {
         binding.btnSort.setOnClickListener { showSortDialog() }
 
         // Λήψη του μονοπατιού από το Dashboard
-        val startPathStr = intent.getStringExtra("START_PATH") ?: Environment.getExternalStorageDirectory().absolutePath
+        val startPathStr = intent.getStringExtra("START_PATH")
+            ?: Environment.getExternalStorageDirectory().absolutePath
         val startPathFile = File(startPathStr)
 
         setupNavigationDrawer()
@@ -204,44 +205,38 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Μέσα στην MainActivity
     private fun loadFiles(directory: File) {
         currentPath = directory
 
-        // Ενημέρωση τίτλου Toolbar - Χρησιμοποιούμε το 'directory'
-        val title = when {
-            directory.absolutePath == "/" -> "Root Directory"
-            directory.absolutePath == Environment.getExternalStorageDirectory().absolutePath -> "Internal Storage"
-            // Έλεγχος για SD Card (αν το path περιέχει storage αλλά όχι emulated)
-            directory.absolutePath.contains("storage") && !directory.absolutePath.contains("emulated") -> "SD Card"
-            else -> directory.name.ifEmpty { directory.absolutePath }
-        }
-        binding.toolbar.title = title
+        // Ο μοναδικός τίτλος
+        val displayTitle = getDisplayTitle(directory.absolutePath)
+        supportActionBar?.title = displayTitle
+        binding.toolbar.title = displayTitle
 
-        // Καθαρίζουμε το cache ΜΟΝΟ για τον τρέχοντα φάκελο ώστε να ξαναμετρηθεί σωστά
+        // Καθαρισμός cache
         sizeCache.remove(directory.absolutePath)
-        binding.toolbar.title = directory.name.ifEmpty { "Internal Storage" }
 
         MainScope().launch {
             val fileList = mutableListOf<FileModel>()
-
-            // 1. Προσπάθεια ανάγνωσης με τον κλασικό τρόπο (Java File API)
             var files = withContext(Dispatchers.IO) { directory.listFiles() }
 
             if (files != null) {
-                // Ο φάκελος διαβάστηκε κανονικά
                 files.forEach {
                     val cachedSize = sizeCache[it.absolutePath]
-                    fileList.add(FileModel(
-                        it.name, it.absolutePath, it.isDirectory,
-                        cachedSize ?: if (it.isDirectory) "..." else formatFileSize(it.length()),
-                        false
-                    ))
+                    fileList.add(
+                        FileModel(
+                            it.name, it.absolutePath, it.isDirectory,
+                            cachedSize
+                                ?: if (it.isDirectory) "..." else formatFileSize(it.length()),
+                            false
+                        )
+                    )
                 }
             } else {
                 // ROOT / BYPASS MODE: Εδώ "πιάνουμε" και τους περίεργους χαρακτήρες
                 // Προσθέτουμε το -p για να ξεχωρίζουμε φακέλους και το -N για raw names
-                val cmd = "export LANG=en_US.UTF-8; ls -p -N --color=never \"${directory.absolutePath}\""
+                val cmd =
+                    "export LANG=en_US.UTF-8; ls -p -N --color=never \"${directory.absolutePath}\""
                 val output = RootTools.getOutput(cmd)
 
                 if (output.isNotEmpty() && !output.contains("Error:")) {
@@ -269,29 +264,30 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // Ταξινόμηση
+            // Ταξινόμηση και update adapter
             fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
             fullFileList = fileList
             updateAdapter(fileList)
 
-            // 3. Background υπολογισμός ΜΟΝΟ για όσα δεν έχουμε στο Cache
+            // Background υπολογισμός μεγεθών φακέλων
             launch(Dispatchers.Default) {
                 fileList.forEachIndexed { index, model ->
                     if (model.isDirectory && sizeCache[model.path] == null) {
-                        // Χρησιμοποιούμε τη "ρηχή" (fast) έκδοση της getFolderMetadata για την SD
-                        val metadata = withContext(Dispatchers.IO) { getFolderMetadata(File(model.path)) }
-
-                        val infoText = if (metadata.fileCount == 0 && metadata.folderCount == 0 && metadata.size == 0L) {
-                            "Κενός φάκελος"
-                        } else {
-                            "${metadata.fileCount} αρχ., ${metadata.folderCount} φακ. | ${formatFileSize(metadata.size)}"
-                        }
-
+                        val metadata =
+                            withContext(Dispatchers.IO) { getFolderMetadata(File(model.path)) }
+                        val infoText =
+                            if (metadata.fileCount == 0 && metadata.folderCount == 0 && metadata.size == 0L) {
+                                "Κενός φάκελος"
+                            } else {
+                                "${metadata.fileCount} αρ., ${metadata.folderCount} φακ. | ${
+                                    formatFileSize(
+                                        metadata.size
+                                    )
+                                }"
+                            }
                         sizeCache[model.path] = infoText
-
                         withContext(Dispatchers.Main) {
                             model.size = infoText
-                            // Payload infoText για να αλλάξει ΜΟΝΟ το κείμενο (όχι φλασάρισμα)
                             binding.recyclerView.adapter?.notifyItemChanged(index, infoText)
                         }
                     }
@@ -351,7 +347,11 @@ class MainActivity : AppCompatActivity() {
         if (size <= 0) return "0 B"
         val units = arrayOf("B", "KB", "MB", "GB", "TB")
         val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
-        return String.format("%.1f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
+        return String.format(
+            "%.1f %s",
+            size / Math.pow(1024.0, digitGroups.toDouble()),
+            units[digitGroups]
+        )
     }
 
     private fun updateAdapter(list: List<FileModel>) {
@@ -576,7 +576,8 @@ class MainActivity : AppCompatActivity() {
                         loadFiles(currentPath)
                         Toast.makeText(this@MainActivity, "Διαγράφηκε", Toast.LENGTH_SHORT).show()
                     } else {
-                        Toast.makeText(this@MainActivity, "Αποτυχία διαγραφής", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "Αποτυχία διαγραφής", Toast.LENGTH_SHORT)
+                            .show()
                     }
                 }
             }
@@ -608,7 +609,8 @@ class MainActivity : AppCompatActivity() {
 
                 if (newName.isNotEmpty()) {
                     if (newName.contains("/")) {
-                        Toast.makeText(this, "Μη έγκυρο όνομα (περιέχει /)", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "Μη έγκυρο όνομα (περιέχει /)", Toast.LENGTH_SHORT)
+                            .show()
                         return@setPositiveButton
                     }
 
@@ -621,7 +623,11 @@ class MainActivity : AppCompatActivity() {
 
                         val parentDirFile = File(oldPathReal).parentFile
                         val parentDir = parentDirFile?.absolutePath ?: run {
-                            Toast.makeText(this@MainActivity, "Αδύνατος γονικός φάκελος", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Αδύνατος γονικός φάκελος",
+                                Toast.LENGTH_SHORT
+                            ).show()
                             return@launch
                         }
 
@@ -643,15 +649,19 @@ class MainActivity : AppCompatActivity() {
 
                                 // 1) Εύρεση Inode
                                 var inode: String? = null
-                                val statOutput = RootTools.getOutput("stat -c %i -- $safeOldPath 2>&1") ?: ""
-                                val statCandidate = statOutput.trim().split(Regex("\\s+")).firstOrNull()
+                                val statOutput =
+                                    RootTools.getOutput("stat -c %i -- $safeOldPath 2>&1") ?: ""
+                                val statCandidate =
+                                    statOutput.trim().split(Regex("\\s+")).firstOrNull()
 
                                 if (statCandidate != null && statCandidate.matches(Regex("\\d+"))) {
                                     inode = statCandidate
                                 }
 
                                 if (inode == null) {
-                                    val listOutput = RootTools.getOutput("cd $safeParent && find . -maxdepth 1 -printf '%i\t%P\n' 2>&1") ?: ""
+                                    val listOutput =
+                                        RootTools.getOutput("cd $safeParent && find . -maxdepth 1 -printf '%i\t%P\n' 2>&1")
+                                            ?: ""
                                     val lines = listOutput.split("\n")
                                     for (ln in lines) {
                                         if (ln.isBlank()) continue
@@ -667,10 +677,14 @@ class MainActivity : AppCompatActivity() {
                                     }
                                 }
 
-                                if (inode == null) return@withContext Pair(false, "Δεν βρέθηκε το Inode του αρχείου")
+                                if (inode == null) return@withContext Pair(
+                                    false,
+                                    "Δεν βρέθηκε το Inode του αρχείου"
+                                )
 
                                 // 2) Εκτέλεση μετονομασίας μέσω Inode
-                                val mvCmd = "cd $safeParent && find . -maxdepth 1 -inum $inode -exec mv -T {} $safeNewName \\; 2>&1"
+                                val mvCmd =
+                                    "cd $safeParent && find . -maxdepth 1 -inum $inode -exec mv -T {} $safeNewName \\; 2>&1"
                                 val mvOutput = RootTools.getOutput(mvCmd) ?: ""
 
                                 // 3) ΕΛΕΓΧΟΣ ΕΠΙΤΥΧΙΑΣ ΜΕΣΩ SHELL (Όχι Java/File.exists)
@@ -702,11 +716,13 @@ class MainActivity : AppCompatActivity() {
 
                             loadFiles(currentPath)
                             exitSelectionMode()
-                            Toast.makeText(this@MainActivity, "Επιτυχία!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, "Επιτυχία!", Toast.LENGTH_SHORT)
+                                .show()
                         } else {
                             // Ακόμα και σε αποτυχία κάνουμε refresh μήπως το αρχείο άλλαξε αλλά η ls απέτυχε
                             loadFiles(currentPath)
-                            Toast.makeText(this@MainActivity, "Αποτυχία: $msg", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@MainActivity, "Αποτυχία: $msg", Toast.LENGTH_LONG)
+                                .show()
                         }
                     }
                 }
@@ -784,9 +800,11 @@ class MainActivity : AppCompatActivity() {
 
                     exitSelectionMode()
                     loadFiles(currentPath)
-                    Toast.makeText(this@MainActivity,
+                    Toast.makeText(
+                        this@MainActivity,
                         if (allSuccess) "Διαγράφηκαν επιτυχώς" else "Κάποιες διαγραφές απέτυχαν",
-                        Toast.LENGTH_SHORT).show()
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
             .setNegativeButton("Όχι", null)
@@ -835,7 +853,8 @@ class MainActivity : AppCompatActivity() {
                                 RootTools.unlockSystem()
 
                                 // 3. Χρήση Root εντολών παντού για να παρακάμψουμε το Scoped Storage
-                                val command = if (isDirectory) "mkdir -p '$realRootPath'" else "touch '$realRootPath'"
+                                val command =
+                                    if (isDirectory) "mkdir -p '$realRootPath'" else "touch '$realRootPath'"
 
                                 // Εκτέλεση μέσω της νέας RootTools που φτιάξαμε
                                 RootTools.executeSilent(command)
@@ -847,9 +866,14 @@ class MainActivity : AppCompatActivity() {
 
                         if (success) {
                             loadFiles(currentPath)
-                            Toast.makeText(this@MainActivity, "Επιτυχία!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, "Επιτυχία!", Toast.LENGTH_SHORT)
+                                .show()
                         } else {
-                            Toast.makeText(this@MainActivity, "Αποτυχία δημιουργίας", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Αποτυχία δημιουργίας",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                     }
                 }
@@ -860,8 +884,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateDrawerMenu() {
         val menu = binding.navigationView.menu
-        val favoriteItem = menu.findItem(R.id.nav_favorites_group) ?:
-        menu.addSubMenu(0, R.id.nav_favorites_group, 100, "Αγαπημένα").item
+        val favoriteItem = menu.findItem(R.id.nav_favorites_group) ?: menu.addSubMenu(
+            0,
+            R.id.nav_favorites_group,
+            100,
+            "Αγαπημένα"
+        ).item
 
         val favoriteSubMenu = favoriteItem.subMenu!!
         favoriteSubMenu.clear()
@@ -873,7 +901,10 @@ class MainActivity : AppCompatActivity() {
                 parts[0] to parts[1]
             } else {
                 // Αν είναι παλιό αγαπημένο χωρίς αστερίσκο
-                val name = if (entry.startsWith("ftp://")) entry.replace("ftp://", "") else File(entry).name
+                val name = if (entry.startsWith("ftp://")) entry.replace(
+                    "ftp://",
+                    ""
+                ) else File(entry).name
                 name to entry
             }
 
@@ -1004,7 +1035,10 @@ class MainActivity : AppCompatActivity() {
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {}
 
-            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+            override fun clearView(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder
+            ) {
                 super.clearView(recyclerView, viewHolder)
                 // Σώζουμε και φρεσκάρουμε τα κουμπιά "X"
                 saveFavorites()
@@ -1014,6 +1048,7 @@ class MainActivity : AppCompatActivity() {
 
         itemTouchHelper.attachToRecyclerView(navRecycler)
     }
+
     private fun loadFavoritesFromPrefs() {
         val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
         val savedPaths = prefs.getString("paths_ordered", "")
@@ -1032,17 +1067,20 @@ class MainActivity : AppCompatActivity() {
                 intent.putExtra("PATH", file.absolutePath)
                 startActivity(intent)
             }
+
             "jpg", "jpeg", "png", "gif", "webp" -> {
                 // Εδώ θα φτιάξεις μια ImageViewActivity αντίστοιχα
                 val intent = Intent(this, ImageViewActivity::class.java)
                 intent.putExtra("PATH", file.absolutePath)
                 startActivity(intent)
             }
+
             "pdf" -> {
                 // Για PDF, αν δεν θες βιβλιοθήκη, η καλύτερη λύση εσωτερικά
                 // είναι το PdfRenderer του Android (θέλει λίγο κώδικα παραπάνω)
                 openPdfInternal(file)
             }
+
             else -> {
                 // Για όλα τα άλλα (mp3, mp4, docx), άνοιγμα με εξωτερική εφαρμογή
                 openFileExternally(file)
@@ -1072,6 +1110,32 @@ class MainActivity : AppCompatActivity() {
     private fun openPdfInternal(file: File) {
         // Προσωρινά τα στέλνουμε έξω μέχρι να φτιάξουμε τον δικό μας Viewer
         openFileExternally(file)
+    }
+
+    private fun getDisplayTitle(path: String): String {
+        // Αν το path είναι ακριβώς "/", το επιστρέφουμε αμέσως
+        if (path == "/") return "Root"
+
+        // Για όλα τα άλλα, αφαιρούμε το τελικό slash αν υπάρχει
+        val normalized = path.removeSuffix("/")
+
+        return when {
+            // Περίπτωση Internal Storage
+            normalized == "/storage/emulated/0" || normalized == "/data/media/0" ->
+                "Internal Storage"
+
+            // Περίπτωση SD Card
+            normalized.startsWith("/storage/") && !normalized.contains("emulated") -> {
+                val parts = normalized.split("/")
+                if (parts.size >= 3) "SD Card" else "Storage"
+            }
+
+            // Οτιδήποτε άλλο (όνομα φακέλου)
+            else -> {
+                val name = File(normalized).name
+                if (name.isEmpty()) normalized else name
+            }
+        }
     }
 }
 
