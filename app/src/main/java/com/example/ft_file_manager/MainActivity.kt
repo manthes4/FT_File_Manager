@@ -970,13 +970,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun saveFavorites() {
-        val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
+        // 1. Αποθήκευση για το Drawer
+        val prefsFav = getSharedPreferences("favorites", MODE_PRIVATE)
         val orderedString = favoritePaths.joinToString("|")
-        prefs.edit()
-            .putString("paths_ordered", orderedString)
-            // Προαιρετικά σβήνουμε το παλιό set για να μην πιάνει χώρο
-            .remove("paths")
-            .apply()
+        prefsFav.edit().putString("paths_ordered", orderedString).apply()
+
+        // 2. Ενημέρωση Dashboard
+        val prefsDash = getSharedPreferences("dashboard_pins", MODE_PRIVATE)
+        val currentDashString = prefsDash.getString("paths", "") ?: ""
+        val currentDashList = currentDashString.split("|").filter { it.isNotEmpty() }.toMutableList()
+
+        // ΑΦΑΙΡΕΣΗ: Αν κάτι δεν υπάρχει πια στα favoritePaths, το βγάζουμε και από το Dashboard
+        val iterator = currentDashList.iterator()
+        while (iterator.hasNext()) {
+            val dashEntry = iterator.next()
+            if (!favoritePaths.contains(dashEntry)) {
+                iterator.remove()
+            }
+        }
+
+        // ΠΡΟΣΘΗΚΗ: Αν κάτι είναι νέο στα favorites, το βάζουμε στο Dashboard
+        favoritePaths.forEach { favEntry ->
+            if (!currentDashList.contains(favEntry)) {
+                currentDashList.add(favEntry)
+            }
+        }
+
+        prefsDash.edit().putString("paths", currentDashList.joinToString("|")).apply()
     }
 
     private fun showRemoveFavoriteDialog(entry: String) {
