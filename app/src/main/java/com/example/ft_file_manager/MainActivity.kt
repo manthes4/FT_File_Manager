@@ -34,6 +34,7 @@ class MainActivity : AppCompatActivity() {
     private var isCutOperation: Boolean = false
     private var isSelectionMode = false // Αυτή η γραμμή έλειπε!
     private var bulkFilesToMove = listOf<FileModel>() // Νέα μεταβλητή στην κορυφή της κλάσης!
+    private val sizeCache = mutableMapOf<String, String>()
 
     // Αντί για MutableSet, χρησιμοποιούμε MutableList για να έχουμε σειρά (index)
     private var favoritePaths = mutableListOf<String>()
@@ -196,27 +197,30 @@ class MainActivity : AppCompatActivity() {
     // Μέσα στην MainActivity
     private fun loadFiles(directory: File) {
         currentPath = directory
+        // Καθαρίζουμε το cache ΜΟΝΟ για τον τρέχοντα φάκελο ώστε να ξαναμετρηθεί σωστά
+        sizeCache.remove(directory.absolutePath)
         binding.toolbar.title = directory.name.ifEmpty { "Internal Storage" }
 
-        // Χρησιμοποιούμε lifecycleScope ή MainScope για να ελέγχουμε το UI
         MainScope().launch {
             val fileList = mutableListOf<FileModel>()
-            val files = withContext(Dispatchers.IO) { directory.listFiles() }
+
+            // 1. Προσπάθεια ανάγνωσης με τον κλασικό τρόπο (Java File API)
+            var files = withContext(Dispatchers.IO) { directory.listFiles() }
 
             if (files != null) {
+                // Ο φάκελος διαβάστηκε κανονικά
                 files.forEach {
-                    fileList.add(
-                        FileModel(
-                            it.name, it.absolutePath, it.isDirectory,
-                            // Αν είναι φάκελος, βάζουμε προσωρινό κείμενο
-                            if (it.isDirectory) "Υπολογισμός..." else formatFileSize(it.length()),
-                            false
-                        )
-                    )
+                    val cachedSize = sizeCache[it.absolutePath]
+                    fileList.add(FileModel(
+                        it.name, it.absolutePath, it.isDirectory,
+                        cachedSize ?: if (it.isDirectory) "..." else formatFileSize(it.length()),
+                        false
+                    ))
                 }
             } else {
-                // ROOT MODE (ls -F)
-                val cmd = "export LANG=en_US.UTF-8; ls -F -N --color=never '${directory.absolutePath}'"
+                // ROOT / BYPASS MODE: Εδώ "πιάνουμε" και τους περίεργους χαρακτήρες
+                // Προσθέτουμε το -p για να ξεχωρίζουμε φακέλους και το -N για raw names
+                val cmd = "export LANG=en_US.UTF-8; ls -p -N --color=never \"${directory.absolutePath}\""
                 val output = RootTools.getOutput(cmd)
 
                 if (output.isNotEmpty() && !output.contains("Error:")) {
@@ -225,12 +229,17 @@ class MainActivity : AppCompatActivity() {
                         if (name.isNotEmpty()) {
                             val isDir = name.endsWith("/")
                             val cleanName = if (isDir) name.dropLast(1) else name
+                            val fullPath = "${directory.absolutePath}/$cleanName".replace("//", "/")
+
+                            // ΕΛΕΓΧΟΣ CACHE: Αν το έχουμε ήδη μετρήσει, το δείχνουμε αμέσως
+                            val cachedSize = sizeCache[fullPath]
+
                             fileList.add(
                                 FileModel(
                                     cleanName,
-                                    "${directory.absolutePath}/$cleanName".replace("//", "/"),
+                                    fullPath,
                                     isDir,
-                                    if (isDir) "Υπολογισμός..." else "System File",
+                                    cachedSize ?: if (isDir) "..." else "System File",
                                     false
                                 )
                             )
@@ -240,30 +249,29 @@ class MainActivity : AppCompatActivity() {
             }
 
             // Ταξινόμηση
-            fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }
-                .thenBy { it.name.lowercase() })
-
+            fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
             fullFileList = fileList
             updateAdapter(fileList)
 
-            // --- ΕΔΩ ΞΕΚΙΝΑΕΙ Ο BACKGROUND ΥΠΟΛΟΓΙΣΜΟΣ ---
+            // 3. Background υπολογισμός ΜΟΝΟ για όσα δεν έχουμε στο Cache
             launch(Dispatchers.Default) {
                 fileList.forEachIndexed { index, model ->
-                    if (model.isDirectory) {
-                        // Υπολογισμός μεγέθους φακέλου στο IO Thread
-                        val sizeValue = withContext(Dispatchers.IO) {
-                            try {
-                                getFolderSize(File(model.path))
-                            } catch (e: Exception) {
-                                0L
-                            }
+                    if (model.isDirectory && sizeCache[model.path] == null) {
+                        // Χρησιμοποιούμε τη "ρηχή" (fast) έκδοση της getFolderMetadata για την SD
+                        val metadata = withContext(Dispatchers.IO) { getFolderMetadata(File(model.path)) }
+
+                        val infoText = if (metadata.fileCount == 0 && metadata.folderCount == 0 && metadata.size == 0L) {
+                            "Κενός φάκελος"
+                        } else {
+                            "${metadata.fileCount} αρχ., ${metadata.folderCount} φακ. | ${formatFileSize(metadata.size)}"
                         }
 
-                        // Ενημέρωση του μοντέλου και του UI αμέσως μόλις βρεθεί το μέγεθος
+                        sizeCache[model.path] = infoText
+
                         withContext(Dispatchers.Main) {
-                            model.size = formatFileSize(sizeValue)
-                            // Ενημερώνουμε μόνο τη συγκεκριμένη σειρά στο RecyclerView για μέγιστη ταχύτητα
-                            binding.recyclerView.adapter?.notifyItemChanged(index)
+                            model.size = infoText
+                            // Payload infoText για να αλλάξει ΜΟΝΟ το κείμενο (όχι φλασάρισμα)
+                            binding.recyclerView.adapter?.notifyItemChanged(index, infoText)
                         }
                     }
                 }
@@ -271,18 +279,51 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun safeDelete(fileModel: FileModel) {
+        MainScope().launch {
+            val success = withContext(Dispatchers.IO) {
+                val path = fileModel.path
+                // Χρησιμοποιούμε rm -rf με διπλά εισαγωγικά για τα σύμβολα
+                RootTools.executeSilent("rm -rf \"$path\"")
+            }
+
+            if (success) {
+                // 1. Αφαιρούμε το αρχείο από το Cache
+                sizeCache.remove(fileModel.path)
+                // 2. Αφαιρούμε τον πατέρα του από το Cache για να ενημερωθεί το "99 αρχεία"
+                sizeCache.remove(currentPath.absolutePath)
+
+                Toast.makeText(this@MainActivity, "Διαγράφηκε", Toast.LENGTH_SHORT).show()
+                loadFiles(currentPath) // Φρεσκάρισμα λίστας
+            } else {
+                Toast.makeText(this@MainActivity, "Αποτυχία διαγραφής", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     // Πρόσθεσε και αυτές τις δύο βοηθητικές συναρτήσεις στην MainActivity
-    private fun getFolderSize(folder: File): Long {
-        var size: Long = 0
+    private fun getFolderMetadata(folder: File): FolderMetadata {
+        var totalSize: Long = 0
+        var totalFiles = 0
+        var totalFolders = 0
+
         val files = folder.listFiles()
         if (files != null) {
             for (file in files) {
-                if (file.isFile) size += file.length()
-                // Προαιρετικά για βάθος: else size += getFolderSize(file)
-                // Σημείωση: Το scan μόνο των αρχείων πρώτου επιπέδου είναι ΠΟΛΥ πιο γρήγορο
+                if (file.isFile) {
+                    totalSize += file.length()
+                    totalFiles++
+                } else if (file.isDirectory) {
+                    totalFolders++
+                    // ΑΝΑΔΡΟΜΗ: Καλεί τον εαυτό της για να μπει στον υποφάκελο
+                    val subMetadata = getFolderMetadata(file)
+                    totalSize += subMetadata.size
+                    totalFiles += subMetadata.fileCount
+                    totalFolders += subMetadata.folderCount
+                }
             }
         }
-        return size
+        return FolderMetadata(totalSize, totalFiles, totalFolders)
     }
 
     private fun formatFileSize(size: Long): String {
@@ -537,47 +578,114 @@ class MainActivity : AppCompatActivity() {
     private fun showRenameDialog(fileModel: FileModel) {
         val input = android.widget.EditText(this)
         input.setText(fileModel.name)
+
         AlertDialog.Builder(this)
             .setTitle("Μετονομασία")
             .setView(input)
             .setPositiveButton("ΟΚ") { _, _ ->
                 val newName = input.text.toString()
+
                 if (newName.isNotEmpty()) {
+                    if (newName.contains("/")) {
+                        Toast.makeText(this, "Μη έγκυρο όνομα (περιέχει /)", Toast.LENGTH_SHORT).show()
+                        return@setPositiveButton
+                    }
+
                     MainScope().launch {
-                        // 1. Μετατροπή της παλιάς διαδρομής σε Real Root Path
                         val oldPathReal = if (fileModel.path.startsWith("/storage/emulated/0")) {
                             fileModel.path.replace("/storage/emulated/0", "/data/media/0")
                         } else {
                             fileModel.path
                         }
 
-                        // 2. Υπολογισμός της νέας διαδρομής (στο ίδιο parent folder)
-                        val parentFile = File(oldPathReal).parent ?: ""
-                        val newPathReal = "$parentFile/$newName".replace("//", "/")
+                        val parentDirFile = File(oldPathReal).parentFile
+                        val parentDir = parentDirFile?.absolutePath ?: run {
+                            Toast.makeText(this@MainActivity, "Αδύνατος γονικός φάκελος", Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
 
-                        // 3. Έλεγχος για System Unlock
                         val isSystem = oldPathReal.startsWith("/system") ||
                                 oldPathReal.startsWith("/vendor") ||
                                 oldPathReal == "/"
 
                         if (isSystem) RootTools.unlockSystem()
 
-                        val success = withContext(Dispatchers.IO) {
-                            // Χρησιμοποιούμε ΠΑΝΤΑ mv μέσω Root για να είμαστε σίγουροι
-                            RootTools.executeSilent("mv '$oldPathReal' '$newPathReal'")
+                        val result = withContext(Dispatchers.IO) {
+                            try {
+                                fun shellEscape(s: String): String {
+                                    return "'" + s.replace("'", "'\\''") + "'"
+                                }
+
+                                val safeParent = shellEscape(parentDir)
+                                val safeNewName = shellEscape(newName)
+                                val safeOldPath = shellEscape(oldPathReal)
+
+                                // 1) Εύρεση Inode
+                                var inode: String? = null
+                                val statOutput = RootTools.getOutput("stat -c %i -- $safeOldPath 2>&1") ?: ""
+                                val statCandidate = statOutput.trim().split(Regex("\\s+")).firstOrNull()
+
+                                if (statCandidate != null && statCandidate.matches(Regex("\\d+"))) {
+                                    inode = statCandidate
+                                }
+
+                                if (inode == null) {
+                                    val listOutput = RootTools.getOutput("cd $safeParent && find . -maxdepth 1 -printf '%i\t%P\n' 2>&1") ?: ""
+                                    val lines = listOutput.split("\n")
+                                    for (ln in lines) {
+                                        if (ln.isBlank()) continue
+                                        val parts = ln.split("\t", limit = 2)
+                                        if (parts.size < 2) continue
+                                        var namePart = parts[1].removePrefix("./").removeSuffix("/")
+                                        val candidate = fileModel.name.removeSuffix("/")
+
+                                        if (namePart == candidate) {
+                                            inode = parts[0].trim()
+                                            break
+                                        }
+                                    }
+                                }
+
+                                if (inode == null) return@withContext Pair(false, "Δεν βρέθηκε το Inode του αρχείου")
+
+                                // 2) Εκτέλεση μετονομασίας μέσω Inode
+                                val mvCmd = "cd $safeParent && find . -maxdepth 1 -inum $inode -exec mv -T {} $safeNewName \\; 2>&1"
+                                val mvOutput = RootTools.getOutput(mvCmd) ?: ""
+
+                                // 3) ΕΛΕΓΧΟΣ ΕΠΙΤΥΧΙΑΣ ΜΕΣΩ SHELL (Όχι Java/File.exists)
+                                // Περιμένουμε ελάχιστα για το FUSE συγχρονισμό
+                                Thread.sleep(150)
+                                val checkOutput = RootTools.getOutput("ls -a $safeParent") ?: ""
+
+                                if (checkOutput.contains(newName)) {
+                                    Pair(true, "Μετονομασία επιτυχής")
+                                } else {
+                                    Pair(false, "Το αρχείο δεν βρέθηκε μετά το mv: $mvOutput")
+                                }
+
+                            } catch (e: Exception) {
+                                Pair(false, "Σφάλμα: ${e.message}")
+                            }
                         }
 
                         if (isSystem) RootTools.lockSystem()
 
-                        if (success) {
+                        val (ok, msg) = result
+                        if (ok) {
+                            // ΚΡΙΣΙΜΟ: Καθαρισμός Cache για να μη δείχνει το παλιό όνομα
+                            sizeCache.remove(fileModel.path)
+                            sizeCache.remove(currentPath.absolutePath)
+
+                            // Μικρό delay πριν το refresh για να προλάβει το UI
+                            delay(200)
+
                             loadFiles(currentPath)
                             exitSelectionMode()
+                            Toast.makeText(this@MainActivity, "Επιτυχία!", Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(
-                                this@MainActivity,
-                                "Αποτυχία μετονομασίας",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            // Ακόμα και σε αποτυχία κάνουμε refresh μήπως το αρχείο άλλαξε αλλά η ls απέτυχε
+                            loadFiles(currentPath)
+                            Toast.makeText(this@MainActivity, "Αποτυχία: $msg", Toast.LENGTH_LONG).show()
                         }
                     }
                 }
@@ -945,3 +1053,5 @@ class MainActivity : AppCompatActivity() {
         openFileExternally(file)
     }
 }
+
+data class FolderMetadata(val size: Long, val fileCount: Int, val folderCount: Int)

@@ -31,18 +31,26 @@ class FileAdapter(
         return FileViewHolder(view)
     }
 
+    override fun onBindViewHolder(holder: FileViewHolder, position: Int, payloads: MutableList<Any>) {
+        if (payloads.isNotEmpty()) {
+            // Αν έχουμε payload, σημαίνει ότι ήρθε μόνο το νέο κείμενο μεγέθους
+            val newSizeText = payloads[0] as String
+            holder.info.text = newSizeText // Ενημερώνουμε ΜΟΝΟ το TextView, τίποτα άλλο!
+        } else {
+            // Αν η λίστα payloads είναι άδεια, κάνε την κανονική πλήρη σχεδίαση
+            super.onBindViewHolder(holder, position, payloads)
+        }
+    }
+
     override fun onBindViewHolder(holder: FileViewHolder, position: Int) {
         val fileModel = files[position]
         val file = File(fileModel.path)
         val extension = fileModel.name.substringAfterLast(".", "").lowercase()
 
         holder.name.text = fileModel.name
-
-        // ΕΔΩ Η ΜΕΓΑΛΗ ΑΛΛΑΓΗ:
-        // Δείχνουμε απλώς το μέγεθος που έχει ήδη το μοντέλο (είτε είναι "Υπολογισμός..." είτε το τελικό MB)
         holder.info.text = fileModel.size
 
-        // Καθαρισμός εικονιδίου πριν τη χρήση
+        // Καθαρισμός και φόρτωση εικονιδίου (Glide κτλ)
         Glide.with(holder.itemView.context).clear(holder.icon)
 
         if (fileModel.isDirectory) {
