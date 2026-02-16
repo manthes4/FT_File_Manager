@@ -127,6 +127,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        binding.btnDashboard.setOnClickListener {
+            finish() // Κλείνει την MainActivity και επιστρέφει στην προηγούμενη (Dashboard)
+        }
+
         binding.fabPaste.setOnClickListener { pasteFile() }
         binding.btnNewFolder.setOnClickListener { view ->
             val popup = androidx.appcompat.widget.PopupMenu(this, view)
@@ -145,13 +149,19 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnSort.setOnClickListener { showSortDialog() }
 
+        // Λήψη του μονοπατιού από το Dashboard
+        val startPathStr = intent.getStringExtra("START_PATH") ?: Environment.getExternalStorageDirectory().absolutePath
+        val startPathFile = File(startPathStr)
+
         setupNavigationDrawer()
         setupBackNavigation()
         checkPermissions()
-        loadFavoritesFromPrefs() // Φόρτωση
-        updateDrawerMenu()       // Σχεδιασμός μενού
-        setupDrawerDragAndDrop() // Ενεργοποίηση Drag & Drop
-        loadFiles(currentPath)
+        loadFavoritesFromPrefs()
+        updateDrawerMenu()
+        setupDrawerDragAndDrop()
+
+// ΠΡΟΣΟΧΗ: Φόρτωσε το αρχείο που ήρθε από το Intent
+        loadFiles(startPathFile)
     }
 
     override fun onResume() {
@@ -197,6 +207,17 @@ class MainActivity : AppCompatActivity() {
     // Μέσα στην MainActivity
     private fun loadFiles(directory: File) {
         currentPath = directory
+
+        // Ενημέρωση τίτλου Toolbar - Χρησιμοποιούμε το 'directory'
+        val title = when {
+            directory.absolutePath == "/" -> "Root Directory"
+            directory.absolutePath == Environment.getExternalStorageDirectory().absolutePath -> "Internal Storage"
+            // Έλεγχος για SD Card (αν το path περιέχει storage αλλά όχι emulated)
+            directory.absolutePath.contains("storage") && !directory.absolutePath.contains("emulated") -> "SD Card"
+            else -> directory.name.ifEmpty { directory.absolutePath }
+        }
+        binding.toolbar.title = title
+
         // Καθαρίζουμε το cache ΜΟΝΟ για τον τρέχοντα φάκελο ώστε να ξαναμετρηθεί σωστά
         sizeCache.remove(directory.absolutePath)
         binding.toolbar.title = directory.name.ifEmpty { "Internal Storage" }
