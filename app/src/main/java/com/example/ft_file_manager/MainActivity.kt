@@ -900,27 +900,27 @@ class MainActivity : AppCompatActivity() {
         favoriteSubMenu.clear()
 
         favoritePaths.forEachIndexed { index, entry ->
-            // Χωρίζουμε το Alias από το Path (μορφή: "Το Όνομά Μου*ftp://host")
+            // Χωρίζουμε το Alias από το Path (μορφή: "Όνομα*smb://user:pass@host")
             val parts = entry.split("*")
             val (displayName, realPath) = if (parts.size > 1) {
                 parts[0] to parts[1]
             } else {
-                // Αν είναι παλιό αγαπημένο χωρίς αστερίσκο
-                val name = if (entry.startsWith("ftp://")) entry.replace(
-                    "ftp://",
-                    ""
-                ) else File(entry).name
+                val name = when {
+                    entry.startsWith("ftp://") -> entry.replace("ftp://", "")
+                    entry.startsWith("smb://") -> entry.substringAfter("@") // Δείχνει μόνο το host
+                    else -> File(entry).name
+                }
                 name to entry
             }
 
             val menuItem = favoriteSubMenu.add(0, index, index, displayName)
             menuItem.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
 
-            // Εικονίδιο ανάλογα με το REAL path
-            if (realPath.startsWith("ftp://")) {
-                menuItem.setIcon(android.R.drawable.ic_menu_share)
-            } else {
-                menuItem.setIcon(android.R.drawable.ic_dialog_map)
+            // --- Εικονίδιο ανάλογα με το πρωτόκολλο ---
+            when {
+                realPath.startsWith("ftp://") -> menuItem.setIcon(android.R.drawable.ic_menu_share)
+                realPath.startsWith("smb://") -> menuItem.setIcon(android.R.drawable.ic_menu_set_as) // Ή ic_network αν έχεις
+                else -> menuItem.setIcon(android.R.drawable.ic_dialog_map)
             }
 
             menuItem.setActionView(R.layout.menu_item_favorite)
@@ -935,13 +935,25 @@ class MainActivity : AppCompatActivity() {
             }
 
             menuItem.setOnMenuItemClickListener {
-                if (realPath.startsWith("ftp://")) {
-                    val host = realPath.replace("ftp://", "")
-                    val intent = Intent(this, FtpActivity::class.java)
-                    intent.putExtra("TARGET_HOST", host)
-                    startActivity(intent)
-                } else {
-                    loadFiles(File(realPath))
+                when {
+                    // ΛΟΓΙΚΗ FTP
+                    realPath.startsWith("ftp://") -> {
+                        val host = realPath.replace("ftp://", "")
+                        val intent = Intent(this, FtpActivity::class.java)
+                        intent.putExtra("TARGET_HOST", host)
+                        startActivity(intent)
+                    }
+                    // ΛΟΓΙΚΗ SMB (ΝΕΟ)
+                    realPath.startsWith("smb://") -> {
+                        val intent = Intent(this, NetworkClientActivity::class.java)
+                        // Στέλνουμε όλο το string "SMB: Host*smb://user:pass@host"
+                        intent.putExtra("FAVORITE_SMB_DATA", entry)
+                        startActivity(intent)
+                    }
+                    // ΤΟΠΙΚΟΙ ΦΑΚΕΛΟΙ
+                    else -> {
+                        loadFiles(File(realPath))
+                    }
                 }
                 binding.drawerLayout.closeDrawers()
                 true

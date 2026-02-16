@@ -54,7 +54,10 @@ class NetworkFileActivity : AppCompatActivity() {
                     } else {
                         // Αν είμαστε σε υποφάκελο, αφαιρούμε το τελευταίο κομμάτι του path
                         val lastSlashIndex = currentPath.lastIndexOf('/')
-                        currentPath = if (lastSlashIndex <= 0) "/" else currentPath.substring(0, lastSlashIndex)
+                        currentPath = if (lastSlashIndex <= 0) "/" else currentPath.substring(
+                            0,
+                            lastSlashIndex
+                        )
                     }
                     loadNetworkFiles() // Ξαναφορτώνουμε τα αρχεία για το νέο path
                 } else {
@@ -70,17 +73,11 @@ class NetworkFileActivity : AppCompatActivity() {
             onItemClick = { fileModel ->
                 if (fileModel.isDirectory) {
                     if (currentPath.isEmpty()) {
-                        // Μόλις πατήσαμε στο Share (π.χ. Videos)
+                        // Επίπεδο Shares
                         shareName = fileModel.name
-                        currentPath = "/" // ΣΗΜΑΝΤΙΚΟ: Ξεκινάμε από το root του share
-
-                        if (!alreadyAskedFavorite) {
-                            askToSaveFavoriteSMB(host, shareName)
-                            alreadyAskedFavorite = true
-                        }
+                        currentPath = "/"
                     } else {
-                        // Πλοήγηση μέσα σε υποφακέλους
-                        // Διασφαλίζουμε ότι δεν προσθέτουμε διπλά slashes
+                        // Επίπεδο Υποφακέλων
                         val base = if (currentPath.endsWith("/")) currentPath else "$currentPath/"
                         currentPath = base + fileModel.name
                     }
@@ -98,7 +95,6 @@ class NetworkFileActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val props = Properties()
-                // Αναγκαίο για Linux/CoreELEC servers
                 props.setProperty("jcifs.smb.client.dfs.disabled", "true")
                 props.setProperty("jcifs.smb.client.minVersion", "SMB210")
                 props.setProperty("jcifs.smb.client.maxVersion", "SMB311")
@@ -108,24 +104,31 @@ class NetworkFileActivity : AppCompatActivity() {
                 val auth = NtlmPasswordAuthenticator(null, user, pass)
                 val context = baseContext.withCredentials(auth)
 
-                // Χτίσιμο του URL με προσοχή στα slashes
                 val smbUrl = if (currentPath.isEmpty()) {
-                    "smb://$host/" // Επίπεδο Host (εδώ βλέπεις τα shares)
+                    "smb://$host/"
                 } else {
-                    // Επίπεδο Share/Folders: smb://192.168.1.10/Videos/Subfolder/
-                    // Καθαρίζουμε το path για να μην έχει διπλά slashes
                     val cleanedPath = if (currentPath == "/") "/" else "$currentPath/"
                     "smb://$host/$shareName$cleanedPath".replace("//", "/").replace("smb:/", "smb://")
                 }
 
-                android.util.Log.d("SMB_DEBUG", "Connecting to: $smbUrl")
-
                 val directory = SmbFile(smbUrl, context)
                 val newList = mutableListOf<FileModel>()
 
-                directory.listFiles().forEach { file ->
+                // 1. Προσπαθούμε να πάρουμε τη λίστα των αρχείων/shares
+                val files = directory.listFiles()
+
+                // 2. ΑΝ είμαστε στο αρχικό επίπεδο (currentPath κενό)
+                // και η listFiles() δεν πέταξε exception (άρα η σύνδεση είναι OK)
+                if (currentPath.isEmpty() && !alreadyAskedFavorite) {
+                    withContext(Dispatchers.Main) {
+                        // Καλούμε τη συνάρτηση στέλνοντας host, user και pass
+                        askToSaveFavoriteSMB(host, user, pass)
+                        alreadyAskedFavorite = true
+                    }
+                }
+
+                files.forEach { file ->
                     val name = file.name.replace("/", "")
-                    // Αγνοούμε τα κρυφά shares συστήματος (C$, IPC$ κτλ)
                     if (currentPath.isEmpty() && name.endsWith("$")) return@forEach
 
                     newList.add(FileModel(
@@ -144,7 +147,6 @@ class NetworkFileActivity : AppCompatActivity() {
                     tvPath.text = if (currentPath.isEmpty()) "Host: $host" else "$shareName$currentPath"
                 }
             } catch (e: Exception) {
-                android.util.Log.e("SMB_ERROR", "Error: ${e.message}")
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@NetworkFileActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                 }
@@ -152,34 +154,39 @@ class NetworkFileActivity : AppCompatActivity() {
         }
     }
 
-    private fun askToSaveFavoriteSMB(host: String, share: String) {
+    private fun askToSaveFavoriteSMB(host: String, user: String, pass: String) {
         val prefsFav = getSharedPreferences("favorites", MODE_PRIVATE)
         val savedPaths = prefsFav.getString("paths_ordered", "") ?: ""
-        val smbPath = "smb://$host/$share"
 
-        // Αν υπάρχει ήδη, δεν ξαναρωτάμε
-        if (savedPaths.split("|").any { it.endsWith("*$smbPath") }) return
+        // Το format αποθήκευσης θα είναι: Όνομα|smb://user:pass@host
+        val smbUriWithAuth = "smb://$user:$pass@$host"
+
+        // Αν υπάρχει ήδη το host, μην ξαναρωτάς
+        if (savedPaths.contains("@$host")) return
 
         android.app.AlertDialog.Builder(this)
-            .setTitle("Προσθήκη στα Αγαπημένα")
-            .setMessage("Θέλετε να προσθέσετε το $share ($host) στα αγαπημένα σας;")
+            .setTitle("Αποθήκευση Σύνδεσης")
+            .setMessage("Θέλετε να αποθηκεύσετε τη σύνδεση στο $host στα αγαπημένα;")
             .setPositiveButton("Ναι") { _, _ ->
                 val favoritePaths = if (savedPaths.isEmpty()) mutableListOf<String>()
                 else savedPaths.split("|").toMutableList()
 
-                val entryToSave = "$share*$smbPath"
+                // Αποθηκεύουμε ως "Server (host)*smb://user:pass@host"
+                val entryToSave = "SMB: $host*$smbUriWithAuth"
                 favoritePaths.add(entryToSave)
+
                 prefsFav.edit().putString("paths_ordered", favoritePaths.joinToString("|")).apply()
 
-                // Dashboard Pins
+                // Ενημέρωση και για το Dashboard αν θέλεις
                 val prefsDash = getSharedPreferences("dashboard_pins", MODE_PRIVATE)
-                val currentDashString = prefsDash.getString("paths", "") ?: ""
-                val currentDashList = currentDashString.split("|").filter { it.isNotEmpty() }.toMutableList()
-                if (!currentDashList.contains(entryToSave)) {
-                    currentDashList.add(entryToSave)
-                    prefsDash.edit().putString("paths", currentDashList.joinToString("|")).apply()
+                val currentDash = prefsDash.getString("paths", "") ?: ""
+                if (!currentDash.contains(smbUriWithAuth)) {
+                    val newDash =
+                        if (currentDash.isEmpty()) entryToSave else "$currentDash|$entryToSave"
+                    prefsDash.edit().putString("paths", newDash).apply()
                 }
-                Toast.makeText(this, "SMB Favorite Saved!", Toast.LENGTH_SHORT).show()
+
+                Toast.makeText(this, "Η σύνδεση αποθηκεύτηκε!", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Όχι", null)
             .show()

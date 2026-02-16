@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
@@ -90,6 +91,12 @@ class NetworkClientActivity : AppCompatActivity() {
             } else {
                 Toast.makeText(this, "Παρακαλώ εισάγετε IP", Toast.LENGTH_SHORT).show()
             }
+        }
+
+        // ΕΛΕΓΧΟΣ ΓΙΑ FAVORITE
+        val favoriteData = intent.getStringExtra("FAVORITE_SMB_DATA")
+        if (!favoriteData.isNullOrEmpty()) {
+            loadFavoriteIntoFields(favoriteData)
         }
     }
 
@@ -248,6 +255,30 @@ class NetworkClientActivity : AppCompatActivity() {
                     Toast.makeText(this@NetworkClientActivity, "SFTP Error: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
+        }
+    }
+
+    private fun loadFavoriteIntoFields(fav: String) {
+        try {
+            // fav = "SMB: Host*smb://user:pass@host"
+            val fullUri = fav.substringAfter("*") // smb://user:pass@host
+            val uriCore = fullUri.removePrefix("smb://") // user:pass@host
+
+            val userPass = uriCore.substringBefore("@") // user:pass
+            val host = uriCore.substringAfter("@") // host
+
+            val user = userPass.substringBefore(":")
+            val pass = userPass.substringAfter(":")
+
+            findViewById<EditText>(R.id.etHost).setText(host)
+            findViewById<EditText>(R.id.etUser).setText(user)
+            findViewById<EditText>(R.id.etPass).setText(pass)
+            findViewById<RadioButton>(R.id.rbSmb).isChecked = true
+            findViewById<EditText>(R.id.etPort).setText("445")
+
+            Toast.makeText(this, "Στοιχεία σύνδεσης $host", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Log.e("FAV_ERROR", "Error parsing favorite", e)
         }
     }
 
