@@ -198,23 +198,24 @@ class MainActivity : AppCompatActivity() {
         currentPath = directory
         binding.toolbar.title = directory.name.ifEmpty { "Internal Storage" }
 
+        // Χρησιμοποιούμε lifecycleScope ή MainScope για να ελέγχουμε το UI
         MainScope().launch {
             val fileList = mutableListOf<FileModel>()
             val files = withContext(Dispatchers.IO) { directory.listFiles() }
 
             if (files != null) {
-                // Java File API: Εδώ συνήθως τα Ελληνικά παίζουν σωστά
                 files.forEach {
                     fileList.add(
                         FileModel(
                             it.name, it.absolutePath, it.isDirectory,
-                            if (it.isDirectory) "Φάκελος" else "${it.length() / 1024} KB", false
+                            // Αν είναι φάκελος, βάζουμε προσωρινό κείμενο
+                            if (it.isDirectory) "Υπολογισμός..." else formatFileSize(it.length()),
+                            false
                         )
                     )
                 }
             } else {
-                // ROOT MODE: Εδώ χρειαζόμαστε το "φιλτράρισμα" για τα Ελληνικά
-                // Προσθέτουμε export LANG και παραμέτρους στο ls
+                // ROOT MODE (ls -F)
                 val cmd = "export LANG=en_US.UTF-8; ls -F -N --color=never '${directory.absolutePath}'"
                 val output = RootTools.getOutput(cmd)
 
@@ -222,17 +223,15 @@ class MainActivity : AppCompatActivity() {
                     output.split("\n").forEach { line ->
                         val name = line.trim()
                         if (name.isNotEmpty()) {
-                            // Το ls -F βάζει / στο τέλος των φακέλων
                             val isDir = name.endsWith("/")
                             val cleanName = if (isDir) name.dropLast(1) else name
-
                             fileList.add(
                                 FileModel(
                                     cleanName,
                                     "${directory.absolutePath}/$cleanName".replace("//", "/"),
                                     isDir,
-                                    if (isDir) "Φάκελος" else "System File",
-                                    true
+                                    if (isDir) "Υπολογισμός..." else "System File",
+                                    false
                                 )
                             )
                         }
@@ -240,13 +239,57 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // Ταξινόμηση (Locale-aware για να μπαίνουν τα Ελληνικά σε σωστή αλφαβητική σειρά)
+            // Ταξινόμηση
             fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }
                 .thenBy { it.name.lowercase() })
 
             fullFileList = fileList
             updateAdapter(fileList)
+
+            // --- ΕΔΩ ΞΕΚΙΝΑΕΙ Ο BACKGROUND ΥΠΟΛΟΓΙΣΜΟΣ ---
+            launch(Dispatchers.Default) {
+                fileList.forEachIndexed { index, model ->
+                    if (model.isDirectory) {
+                        // Υπολογισμός μεγέθους φακέλου στο IO Thread
+                        val sizeValue = withContext(Dispatchers.IO) {
+                            try {
+                                getFolderSize(File(model.path))
+                            } catch (e: Exception) {
+                                0L
+                            }
+                        }
+
+                        // Ενημέρωση του μοντέλου και του UI αμέσως μόλις βρεθεί το μέγεθος
+                        withContext(Dispatchers.Main) {
+                            model.size = formatFileSize(sizeValue)
+                            // Ενημερώνουμε μόνο τη συγκεκριμένη σειρά στο RecyclerView για μέγιστη ταχύτητα
+                            binding.recyclerView.adapter?.notifyItemChanged(index)
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    // Πρόσθεσε και αυτές τις δύο βοηθητικές συναρτήσεις στην MainActivity
+    private fun getFolderSize(folder: File): Long {
+        var size: Long = 0
+        val files = folder.listFiles()
+        if (files != null) {
+            for (file in files) {
+                if (file.isFile) size += file.length()
+                // Προαιρετικά για βάθος: else size += getFolderSize(file)
+                // Σημείωση: Το scan μόνο των αρχείων πρώτου επιπέδου είναι ΠΟΛΥ πιο γρήγορο
+            }
+        }
+        return size
+    }
+
+    private fun formatFileSize(size: Long): String {
+        if (size <= 0) return "0 B"
+        val units = arrayOf("B", "KB", "MB", "GB", "TB")
+        val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
+        return String.format("%.1f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
     }
 
     private fun updateAdapter(list: List<FileModel>) {

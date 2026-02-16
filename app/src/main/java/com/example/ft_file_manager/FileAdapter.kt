@@ -10,6 +10,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import java.io.File
 import android.webkit.MimeTypeMap
+import com.bumptech.glide.load.engine.DiskCacheStrategy
 
 class FileAdapter(
     private val files: List<FileModel>,
@@ -30,25 +31,6 @@ class FileAdapter(
         return FileViewHolder(view)
     }
 
-    // Συνάρτηση για όμορφη μορφοποίηση μεγέθους
-    private fun formatSize(bytes: Long): String {
-        if (bytes <= 0) return "0 B"
-        val kb = bytes / 1024.0
-        val mb = kb / 1024.0
-        return if (mb >= 1) String.format("%.2f MB", mb) else String.format("%.2f KB", kb)
-    }
-
-    // Συνάρτηση για πληροφορίες φακέλου (αριθμός αρχείων και συνολικό μέγεθος)
-    private fun getFolderInfo(folder: File): Pair<Int, Long> {
-        var totalSize: Long = 0
-        var fileCount = 0
-        folder.listFiles()?.forEach {
-            fileCount++
-            if (it.isFile) totalSize += it.length()
-        }
-        return Pair(fileCount, totalSize)
-    }
-
     override fun onBindViewHolder(holder: FileViewHolder, position: Int) {
         val fileModel = files[position]
         val file = File(fileModel.path)
@@ -56,34 +38,26 @@ class FileAdapter(
 
         holder.name.text = fileModel.name
 
-        // 1. Καθαρισμός Glide & Διαχείριση Μεγέθους/Πληροφοριών
+        // ΕΔΩ Η ΜΕΓΑΛΗ ΑΛΛΑΓΗ:
+        // Δείχνουμε απλώς το μέγεθος που έχει ήδη το μοντέλο (είτε είναι "Υπολογισμός..." είτε το τελικό MB)
+        holder.info.text = fileModel.size
+
+        // Καθαρισμός εικονιδίου πριν τη χρήση
         Glide.with(holder.itemView.context).clear(holder.icon)
 
         if (fileModel.isDirectory) {
-            // Εικονίδιο Φακέλου
             holder.icon.setImageResource(R.drawable.ic_folder_yellow)
-
-            // Πληροφορίες Φακέλου (Μόνο για τοπικά αρχεία)
-            if (!fileModel.path.startsWith("ftp://")) {
-                val (count, size) = getFolderInfo(file)
-                holder.info.text = "$count στοιχεία | ${formatSize(size)}"
-            } else {
-                holder.info.text = "Φάκελος FTP"
-            }
         } else {
-            // Πληροφορίες Αρχείου (KB/MB)
-            val sizeInBytes = if (!fileModel.path.startsWith("ftp://")) file.length() else 0L
-            // Σημείωση: Στο FTP το μέγεθος θα πρέπει να έρχεται έτοιμο από το fileModel.size αν είναι δυνατόν
-            holder.info.text = if (sizeInBytes > 0) formatSize(sizeInBytes) else fileModel.size
-
-            // 2. Λογική Εικονιδίων Αρχείων
+            // Λογική εικονιδίων για αρχεία
             if (!fileModel.path.startsWith("ftp://") &&
                 extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp")) {
 
                 Glide.with(holder.itemView.context)
                     .load(file)
                     .centerCrop()
-                    .placeholder(R.drawable.ic_image_placeholder) // Βάλε ένα εικονίδιο για "loading"
+                    .thumbnail(0.1f) // Φορτώνει γρήγορα μια μικρογραφία
+                    .diskCacheStrategy(DiskCacheStrategy.ALL) // Cache για να μην κολλάει στο scroll
+                    .placeholder(R.drawable.ic_image_placeholder)
                     .into(holder.icon)
             } else {
                 // Στατικά εικονίδια για FTP ή μη-εικόνες
