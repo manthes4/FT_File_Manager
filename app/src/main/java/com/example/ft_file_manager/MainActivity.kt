@@ -986,7 +986,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateDrawerMenu() {
-        val menu = binding.navigationView.menu
+        val navView = binding.navigationView
+        val menu = navView.menu
         val favoriteItem = menu.findItem(R.id.nav_favorites_group) ?: menu.addSubMenu(
             0,
             R.id.nav_favorites_group,
@@ -994,8 +995,19 @@ class MainActivity : AppCompatActivity() {
             "Αγαπημένα"
         ).item
 
-        val favoriteSubMenu = favoriteItem.subMenu!!
-        favoriteSubMenu.clear()
+        // 1. Καθαρισμός Header (για να μην διπλασιάζεται η εικόνα)
+        while (navView.headerCount > 0) {
+            navView.removeHeaderView(navView.getHeaderView(0))
+        }
+        navView.inflateHeaderView(R.layout.nav_header_favorites)
+
+        // 2. ΚΑΘΟΛΙΚΟΣ ΚΑΘΑΡΙΣΜΟΣ του Group και του SubMenu
+        // Αφαιρούμε το Group ΚΑΙ το Item που κρατάει το SubMenu
+        menu.removeItem(R.id.nav_favorites_group)
+        menu.removeGroup(R.id.nav_favorites_group)
+
+        // 3. Δημιουργία από το μηδέν
+        val favoriteSubMenu = menu.addSubMenu(0, R.id.nav_favorites_group, 100, "ΑΓΑΠΗΜΕΝΑ")
 
         favoritePaths.forEachIndexed { index, entry ->
             // Χωρίζουμε το Alias από το Path (μορφή: "Όνομα*smb://user:pass@host")

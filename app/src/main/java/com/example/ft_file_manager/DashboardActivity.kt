@@ -93,18 +93,30 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun updateDrawerMenu() {
-        val navigationView = findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
-        val menu = navigationView.menu
+        val navView = findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
+        val menu = navView.menu
 
-        // Καθαρισμός προηγούμενων για να μην διπλασιάζονται
+        // 1. ΚΑΘΑΡΙΣΜΟΣ HEADER (Εικόνα)
+        // Σβήνουμε παλιά headers για να μην γεμίσει η οθόνη εικόνες σε κάθε refresh
+        while (navView.headerCount > 0) {
+            navView.removeHeaderView(navView.getHeaderView(0))
+        }
+        // Εισαγωγή της εικόνας από το XML που φτιάξαμε
+        navView.inflateHeaderView(R.layout.nav_header_favorites)
+
+        // 2. ΚΑΘΑΛΙΚΟΣ ΚΑΘΑΡΙΣΜΟΣ GROUP & ITEM
+        // Αφαιρούμε το item και το group για να "ξεπλύνουμε" το SubMenu
+        menu.removeItem(R.id.group_favorites)
         menu.removeGroup(R.id.group_favorites)
 
         val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
         val savedPaths = prefs.getString("paths_ordered", "") ?: ""
 
         if (savedPaths.isNotEmpty()) {
-            val entries = savedPaths.split("|").filter { it.isNotEmpty() }
+            // 3. ΔΗΜΙΟΥΡΓΙΑ SUBMENU (Όπως στη Main)
+            val favoriteSubMenu = menu.addSubMenu(0, R.id.group_favorites, 100, "ΑΓΑΠΗΜΕΝΑ")
 
+            val entries = savedPaths.split("|").filter { it.isNotEmpty() }
             entries.forEachIndexed { index, entry ->
                 val parts = entry.split("*")
                 if (parts.size == 2) {
