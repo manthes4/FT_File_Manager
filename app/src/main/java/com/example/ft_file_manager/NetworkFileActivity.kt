@@ -65,7 +65,7 @@ class NetworkFileActivity : AppCompatActivity() {
 
 // Το NavigationClickListener μένει ως έχει για το Home
         toolbar.setNavigationOnClickListener {
-            val intent = Intent(this, MainActivity::class.java)
+            val intent = Intent(this, DashboardActivity::class.java)
             intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             startActivity(intent)
             finish()
@@ -316,7 +316,12 @@ class NetworkFileActivity : AppCompatActivity() {
 
             findViewById<FloatingActionButton>(R.id.fabPasteSmb).show()
             Toast.makeText(this, "Αρχεία δικτύου στην ουρά", Toast.LENGTH_SHORT).show()
-        }
+        // --- ΑΥΤΟΜΑΤΗ ΕΠΙΣΤΡΟΦΗ ΣΤΟ DASHBOARD ---
+        val intent = Intent(this, DashboardActivity::class.java)
+        intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
+        startActivity(intent)
+        finish() // Κλείνουμε τη λίστα αρχείων για να καθαρίσει το stack
+    }
 
     private fun executePaste() {
         lifecycleScope.launch(Dispatchers.IO) {

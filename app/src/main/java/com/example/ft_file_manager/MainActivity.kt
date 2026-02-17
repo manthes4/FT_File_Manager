@@ -387,21 +387,31 @@ class MainActivity : AppCompatActivity() {
             list,
             isInSelectionMode = isSelectionMode,
             onItemClick = { selectedFile ->
-                val file = File(selectedFile.path)
-                if (selectedFile.isDirectory) loadFiles(file) else openFile(file)
+                // ΑΝ είμαστε σε λειτουργία επιλογής, τότε το απλό πάτημα επιλέγει/αποεπιλέγει
+                if (isSelectionMode) {
+                    selectedFile.isSelected = !selectedFile.isSelected
+                    binding.recyclerView.adapter?.notifyDataSetChanged()
+
+                    // Ενημέρωση τίτλου και μενού
+                    val count = fullFileList.count { it.isSelected }
+                    if (count == 0) exitSelectionMode()
+                    else binding.toolbar.title = "$count επιλεγμένα"
+                } else {
+                    // ΑΝ ΔΕΝ είμαστε σε selection mode, άνοιξε το αρχείο κανονικά
+                    val file = File(selectedFile.path)
+                    if (selectedFile.isDirectory) loadFiles(file) else openFile(file)
+                }
             },
             onItemLongClick = { selectedFile ->
                 if (!isSelectionMode) {
                     selectedFile.isSelected = true
                     toggleSelectionMode(true)
-                    // Αφαιρέθηκε το showOptionsDialog(selectedFile)
                 }
             },
             onSelectionChanged = {
                 val count = fullFileList.count { it.isSelected }
-                if (count == 0) {
-                    exitSelectionMode()
-                } else {
+                if (count == 0) exitSelectionMode()
+                else {
                     binding.toolbar.title = "$count επιλεγμένα"
                     updateMenuVisibility()
                 }
