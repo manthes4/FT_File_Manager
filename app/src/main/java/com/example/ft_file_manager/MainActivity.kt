@@ -97,22 +97,37 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 R.id.action_copy -> {
-                    // Ενημέρωση του TransferManager για μεταφορά προς το CoreELEC
+                    // 1. Προετοιμασία των αρχείων στον TransferManager
                     TransferManager.filesToMove = selectedFiles
                     TransferManager.isCut = false
-                    TransferManager.sourceIsSmb = false // Η πηγή είναι το ΚΙΝΗΤΟ
+                    TransferManager.sourceIsSmb = false
 
                     startBulkMove(selectedFiles, isCut = false)
+
+                    // 2. ΜΕΤΑΒΑΣΗ ΣΤΟ DASHBOARD
+                    val intent = Intent(this, DashboardActivity::class.java)
+                    // Καθαρίζουμε το ιστορικό ώστε το Back να μην σε γυρνάει εδώ, αλλά να κλείνει το app ή να μένει στο Dashboard
+                    intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    startActivity(intent)
+
+                    // 3. Κλείνουμε την τρέχουσα Activity φακέλων
+                    finish()
                     true
                 }
 
                 R.id.action_cut -> {
-                    // Ενημέρωση του TransferManager για μεταφορά προς το CoreELEC
                     TransferManager.filesToMove = selectedFiles
                     TransferManager.isCut = true
-                    TransferManager.sourceIsSmb = false // Η πηγή είναι το ΚΙΝΗΤΟ
+                    TransferManager.sourceIsSmb = false
 
                     startBulkMove(selectedFiles, isCut = true)
+
+                    // ΜΕΤΑΒΑΣΗ ΣΤΟ DASHBOARD
+                    val intent = Intent(this, DashboardActivity::class.java)
+                    intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    startActivity(intent)
+
+                    finish()
                     true
                 }
 
@@ -425,25 +440,41 @@ class MainActivity : AppCompatActivity() {
         val view = layoutInflater.inflate(R.layout.layout_file_options, null)
 
         view.findViewById<TextView>(R.id.btnCopy).setOnClickListener {
+            // Ενημέρωση τοπικών μεταβλητών (για συμβατότητα)
             fileToMove = file
             isCutOperation = false
-            binding.fabPaste.show()
+
+            // Ενημέρωση TransferManager (για να το βρει η νέα Activity μετά το Dashboard)
+            TransferManager.filesToMove = listOf(file)
+            TransferManager.isCut = false
+            TransferManager.sourceIsSmb = false
+
             dialog.dismiss()
 
-            // Μεταφορά στον αρχικό κατάλογο της εσωτερικής μνήμης
+            // ΜΕΤΑΒΑΣΗ ΣΤΟ DASHBOARD
+            val intent = Intent(this, DashboardActivity::class.java)
+            intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            startActivity(intent)
 
-            loadFiles(Environment.getExternalStorageDirectory())
+            finish()
         }
 
         view.findViewById<TextView>(R.id.btnCut).setOnClickListener {
             fileToMove = file
             isCutOperation = true
-            binding.fabPaste.show()
+
+            TransferManager.filesToMove = listOf(file)
+            TransferManager.isCut = true
+            TransferManager.sourceIsSmb = false
+
             dialog.dismiss()
 
-            // Μεταφορά στον αρχικό κατάλογο της εσωτερικής μνήμης
+            // ΜΕΤΑΒΑΣΗ ΣΤΟ DASHBOARD
+            val intent = Intent(this, DashboardActivity::class.java)
+            intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            startActivity(intent)
 
-            loadFiles(Environment.getExternalStorageDirectory())
+            finish()
         }
 
         view.findViewById<TextView>(R.id.btnDelete).setOnClickListener {
@@ -468,13 +499,19 @@ class MainActivity : AppCompatActivity() {
     private fun pasteFile() {
         // 1. ΕΛΕΓΧΟΣ: Μήπως έρχονται αρχεία από το CoreELEC;
         if (TransferManager.filesToMove.isNotEmpty() && TransferManager.sourceIsSmb) {
-            executeLocalPaste() // Καλεί την ειδική συνάρτηση για SMB Download
+            executeLocalPaste()
             return
         }
 
-        // 2. Αν όχι, συνεχίζουμε με τα τοπικά αρχεία (Root Paste)
-        val filesToProcess = if (fileToMove != null) listOf(fileToMove!!) else bulkFilesToMove
-        if (filesToProcess.isEmpty()) return
+        // 2. ΤΟΠΙΚΗ ΕΠΙΚΟΛΛΗΣΗ (Ανάμεσα σε φακέλους του κινητού)
+        // Τραβάμε τα δεδομένα από τον TransferManager γιατί οι τοπικές μεταβλητές χάθηκαν στο Dashboard
+        val filesToProcess = TransferManager.filesToMove
+        val isCut = TransferManager.isCut // Χρησιμοποιούμε το isCut του TransferManager
+
+        if (filesToProcess.isEmpty()) {
+            Toast.makeText(this, "Δεν υπάρχουν αρχεία για επικόλληση", Toast.LENGTH_SHORT).show()
+            return
+        }
 
         MainScope().launch {
             binding.progressBar.visibility = View.VISIBLE
@@ -503,7 +540,8 @@ class MainActivity : AppCompatActivity() {
                     val finalDestPath = "$realDestDir/$fileName".replace("//", "/")
 
                     try {
-                        val command = if (isCutOperation) "mv '$realSourcePath' '$finalDestPath'" else "cp -r '$realSourcePath' '$finalDestPath'"
+                        // ΠΡΟΣΟΧΗ: Εδώ χρησιμοποιούμε την τοπική μεταβλητή isCut που πήραμε από τον Manager
+                        val command = if (isCut) "mv '$realSourcePath' '$finalDestPath'" else "cp -r '$realSourcePath' '$finalDestPath'"
                         val result = RootTools.executeSilent(command)
                         if (!result) allSuccess = false
                     } catch (e: Exception) {
@@ -515,9 +553,13 @@ class MainActivity : AppCompatActivity() {
             if (isSystemTarget) RootTools.lockSystem()
             binding.progressBar.visibility = View.GONE
             loadFiles(currentPath)
+
+            // ΚΑΘΑΡΙΣΜΟΣ
             binding.fabPaste.hide()
+            TransferManager.filesToMove = emptyList() // Αδειάζουμε τον Manager για να μην ξανακάνει Paste τα ίδια
             fileToMove = null
             bulkFilesToMove = emptyList()
+
             Toast.makeText(this@MainActivity, if (allSuccess) "Ολοκληρώθηκε!" else "Αποτυχία", Toast.LENGTH_SHORT).show()
         }
     }
@@ -884,18 +926,9 @@ class MainActivity : AppCompatActivity() {
     private fun startBulkMove(selectedFiles: List<FileModel>, isCut: Boolean) {
         bulkFilesToMove = selectedFiles
         isCutOperation = isCut
-        fileToMove = null // Ακυρώνουμε την μεμονωμένη μεταφορά αν υπήρχε
-
-        Toast.makeText(
-            this,
-            "${selectedFiles.size} αρχεία έτοιμα για επικόλληση",
-            Toast.LENGTH_SHORT
-        ).show()
+        fileToMove = null
         exitSelectionMode()
-        binding.fabPaste.show()
-
-        // Μεταφορά στον αρχικό κατάλογο της εσωτερικής μνήμης
-        loadFiles(Environment.getExternalStorageDirectory())
+        // Τίποτα άλλο εδώ!
     }
 
     private fun showCreateItemDialog(isDirectory: Boolean) {
