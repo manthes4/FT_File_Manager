@@ -1,5 +1,6 @@
 package com.example.ft_file_manager
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.EditText // Προστέθηκε
 import android.widget.TextView
@@ -10,6 +11,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -52,7 +54,25 @@ class NetworkFileActivity : AppCompatActivity() {
         user = intent.getStringExtra("USER") ?: ""
         pass = intent.getStringExtra("PASS") ?: ""
 
+        // Μέσα στην onCreate
+        // --- ΣΤΗΝ onCreate ---
         val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar)
+        setSupportActionBar(toolbar)
+
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.setHomeAsUpIndicator(R.drawable.home_24px)
+        supportActionBar?.title = "SMB: $host"
+
+// Το NavigationClickListener μένει ως έχει για το Home
+        toolbar.setNavigationOnClickListener {
+            val intent = Intent(this, MainActivity::class.java)
+            intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            startActivity(intent)
+            finish()
+        }
+// ----------------------
+
+// Φόρτωσε το μενού
         toolbar.inflateMenu(R.menu.contextual_menu)
         toolbar.setOnMenuItemClickListener { item ->
             val selectedFiles = networkFiles.filter { it.isSelected }
@@ -83,10 +103,18 @@ class NetworkFileActivity : AppCompatActivity() {
             }
         }
 
-        val fabPaste = findViewById<com.google.android.material.floatingactionbutton.FloatingActionButton>(R.id.fabPasteSmb)
+        // --- Μέσα στην onCreate ---
+        val fabPaste = findViewById<FloatingActionButton>(R.id.fabPasteSmb)
+
+// 1. ΕΜΦΑΝΙΣΗ: Αν υπάρχουν ήδη αρχεία στον TransferManager (από το κινητό), δείξε το κουμπί
+        if (TransferManager.filesToMove.isNotEmpty()) {
+            fabPaste.show()
+        }
+
+// 2. Η ΔΡΑΣΗ: Εδώ συνδέουμε το κλικ με τη συνάρτηση executePaste()
         fabPaste.setOnClickListener {
+            android.util.Log.d("SMB_DEBUG", "Paste button clicked!")
             executePaste()
-            fabPaste.hide() // Κρύβεται αφού γίνει η επικόλληση
         }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -154,6 +182,48 @@ class NetworkFileActivity : AppCompatActivity() {
         )
         rvFiles.adapter = fileAdapter
         loadNetworkFiles()
+    }
+
+    override fun onCreateOptionsMenu(menu: android.view.Menu?): Boolean {
+        menuInflater.inflate(R.menu.contextual_menu, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
+        val selectedFiles = networkFiles.filter { it.isSelected }
+
+        when (item.itemId) {
+            // Η Αποκοπή (Cut) τώρα θα δουλεύει γιατί προσθέσαμε το renameTo στην executePaste
+            R.id.action_copy, R.id.action_cut -> {
+                if (selectedFiles.isNotEmpty()) {
+                    preparePaste(selectedFiles, item.itemId == R.id.action_cut)
+                    networkFiles.forEach { it.isSelected = false }
+                    fileAdapter.notifyDataSetChanged()
+                }
+                return true
+            }
+            R.id.action_delete -> {
+                if (selectedFiles.isNotEmpty()) showDeleteConfirmDialog(selectedFiles)
+                return true
+            }
+            R.id.action_rename -> {
+                if (selectedFiles.size == 1) showRenameDialog(selectedFiles[0])
+                return true
+            }
+            R.id.action_favorite -> {
+                showNewFolderDialog()
+                return true
+            }
+            R.id.action_share -> {
+                if (selectedFiles.size == 1) {
+                    shareFileFromNetwork(selectedFiles[0])
+                } else {
+                    Toast.makeText(this, "Επιλέξτε ένα αρχείο για share", Toast.LENGTH_SHORT).show()
+                }
+                return true
+            }
+        }
+        return super.onOptionsItemSelected(item)
     }
 
     private fun loadNetworkFiles() {
@@ -239,33 +309,132 @@ class NetworkFileActivity : AppCompatActivity() {
             }.setNegativeButton("Όχι", null).show()
     }
 
+    private fun shareFileFromNetwork(fileModel: FileModel) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // 1. Ενημέρωση χρήστη στην κύρια thread
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@NetworkFileActivity, "Προετοιμασία αρχείου για κοινή χρήση...", Toast.LENGTH_SHORT).show()
+                }
+
+                val source = SmbFile(fileModel.path, smbContext!!)
+                val tempFile = java.io.File(cacheDir, fileModel.name)
+
+                // 2. Κατέβασμα αρχείου στην cache με χρήση Buffer
+                org.codelibs.jcifs.smb.impl.SmbFileInputStream(source).use { input ->
+                    java.io.FileOutputStream(tempFile).use { output ->
+                        val buffer = ByteArray(16384) // 16KB buffer
+                        var bytesRead: Int
+                        while (input.read(buffer).also { bytesRead = it } != -1) {
+                            output.write(buffer, 0, bytesRead)
+                        }
+                        output.flush()
+                    }
+                }
+
+                // 3. Δημιουργία του URI και εκτέλεση του Share στην Main Thread
+                withContext(Dispatchers.Main) {
+                    // Μέσα στη shareFileFromNetwork, στο βήμα 3:
+                    val contentUri = androidx.core.content.FileProvider.getUriForFile(
+                        this@NetworkFileActivity,
+                        "com.example.ft_file_manager.fileprovider", // Βάλε το Package Name σου ΧΕΙΡΟΚΙΝΗΤΑ για σιγουριά
+                        tempFile
+                    )
+
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = contentResolver.getType(contentUri) ?: "*/*"
+                        putExtra(Intent.EXTRA_STREAM, contentUri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) // ΠΟΛΥ ΣΗΜΑΝΤΙΚΟ
+                    }
+
+// Δημιουργία chooser και προσθήκη του flag και εκεί
+                    val chooser = Intent.createChooser(shareIntent, "Κοινοποίηση")
+                    chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    startActivity(chooser)
+                }
+            } catch (e: Exception) {
+                showError("Share Error: ${e.message}")
+            }
+        }
+    }
+
     private fun preparePaste(files: List<FileModel>, isCut: Boolean) {
         this.smbFilesToMove = files
         this.isCutOperation = isCut
         // Εμφανίζει το κουμπί μόνο όταν έχουμε αρχεία στο "clipboard"
-        findViewById<com.google.android.material.floatingactionbutton.FloatingActionButton>(R.id.fabPasteSmb).show()
-        Toast.makeText(this, "Έτοιμο για επικόλληση", Toast.LENGTH_SHORT).show()
-    }
+            TransferManager.filesToMove = files
+            TransferManager.isCut = isCut
+            TransferManager.sourceIsSmb = true // Η πηγή είναι το δίκτυο
+            TransferManager.smbHost = host
+            TransferManager.smbUser = user
+            TransferManager.smbPass = pass
+
+            findViewById<FloatingActionButton>(R.id.fabPasteSmb).show()
+            Toast.makeText(this, "Αρχεία δικτύου στην ουρά", Toast.LENGTH_SHORT).show()
+        }
+
     private fun executePaste() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val destUrl = if (currentPath == "/") "smb://$host/$shareName/"
-                else "smb://$host/$shareName$currentPath/"
+                // Αν για κάποιο λόγο οι μεταβλητές της Activity είναι κενές (π.χ. φρεσκοανοιγμένη),
+                // πάρε τα στοιχεία από τον TransferManager
+                if (host.isEmpty()) host = TransferManager.smbHost
+                if (user.isEmpty()) user = TransferManager.smbUser
+                if (pass.isEmpty()) pass = TransferManager.smbPass
 
-                smbFilesToMove.forEach { model ->
-                    val source = SmbFile(model.path, smbContext!!)
-                    val dest = SmbFile(destUrl + source.name, smbContext!!)
-                    if (isCutOperation) source.renameTo(dest) else source.copyTo(dest)
+                if (smbContext == null) {
+                    // Αν δεν έχει προλάβει να συνδεθεί, δημιούργησε το context τώρα
+                    val props = Properties()
+                    props.setProperty("jcifs.smb.client.dfs.disabled", "true")
+                    val config = PropertyConfiguration(props)
+                    val baseContext = BaseContext(config)
+                    val auth = NtlmPasswordAuthenticator(null, user, pass)
+                    smbContext = baseContext.withCredentials(auth)
                 }
+
+                // Ενημέρωση UI ότι ξεκινήσαμε
                 withContext(Dispatchers.Main) {
-                    smbFilesToMove = emptyList() // Άδειασμα clipboard
-                    networkFiles.forEach { it.isSelected = false } // Ξετσεκάρισμα
-                    loadNetworkFiles() // Φρεσκάρισμα λίστας
-                    Toast.makeText(this@NetworkFileActivity, "Ολοκληρώθηκε!", Toast.LENGTH_SHORT)
-                        .show()
+                    Toast.makeText(this@NetworkFileActivity, "Έναρξη επικόλλησης...", Toast.LENGTH_SHORT).show()
+                }
+
+                val destUrl = if (currentPath == "/" || currentPath.isEmpty()) "smb://$host/$shareName/"
+                else "smb://$host/$shareName$currentPath/".replace("//", "/")
+
+                TransferManager.filesToMove.forEach { model ->
+                    val destSmbFile = SmbFile(destUrl + java.io.File(model.path).name, smbContext!!)
+
+                    if (!TransferManager.sourceIsSmb) {
+                        // --- UPLOAD: Κινητό -> CoreELEC ---
+                        val localFile = java.io.File(model.path)
+                        java.io.FileInputStream(localFile).use { input ->
+                            destSmbFile.outputStream.use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        if (TransferManager.isCut) localFile.delete()
+                    } else {
+                        // --- SMB -> SMB: Εντός CoreELEC ---
+                        val sourceSmb = SmbFile(model.path, smbContext!!)
+                        if (TransferManager.isCut) {
+                            try { sourceSmb.renameTo(destSmbFile) }
+                            catch (e: Exception) { sourceSmb.copyTo(destSmbFile); sourceSmb.delete() }
+                        } else {
+                            sourceSmb.copyTo(destSmbFile)
+                        }
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    TransferManager.filesToMove = emptyList()
+                    loadNetworkFiles()
+                    findViewById<FloatingActionButton>(R.id.fabPasteSmb).hide()
+                    Toast.makeText(this@NetworkFileActivity, "Επιτυχής μεταφορά!", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
-                showError(e.message)
+                withContext(Dispatchers.Main) {
+                    android.util.Log.e("SMB_ERROR", "Paste failed: ${e.message}")
+                    showError("Paste Error: ${e.message}")
+                }
             }
         }
     }

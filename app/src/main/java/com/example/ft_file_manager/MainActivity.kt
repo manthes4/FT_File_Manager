@@ -25,6 +25,7 @@ import java.io.File
 import kotlinx.coroutines.*
 import java.util.Collections
 import kotlin.jvm.java
+import androidx.lifecycle.lifecycleScope
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -96,11 +97,23 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 R.id.action_copy -> {
-                    startBulkMove(selectedFiles, isCut = false); true
+                    // Ενημέρωση του TransferManager για μεταφορά προς το CoreELEC
+                    TransferManager.filesToMove = selectedFiles
+                    TransferManager.isCut = false
+                    TransferManager.sourceIsSmb = false // Η πηγή είναι το ΚΙΝΗΤΟ
+
+                    startBulkMove(selectedFiles, isCut = false)
+                    true
                 }
 
                 R.id.action_cut -> {
-                    startBulkMove(selectedFiles, isCut = true); true
+                    // Ενημέρωση του TransferManager για μεταφορά προς το CoreELEC
+                    TransferManager.filesToMove = selectedFiles
+                    TransferManager.isCut = true
+                    TransferManager.sourceIsSmb = false // Η πηγή είναι το ΚΙΝΗΤΟ
+
+                    startBulkMove(selectedFiles, isCut = true)
+                    true
                 }
 
                 R.id.action_rename -> {
@@ -167,9 +180,19 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Αυτό εκτελείται κάθε φορά που επιστρέφεις στην εφαρμογή ή κλείνεις την FtpActivity
+        // Αυτό εκτελείται κάθε φορά που επιστρέφεις στην εφαρμογή
         loadFavoritesFromPrefs()
         updateDrawerMenu()
+
+        // --- Η ΠΡΟΣΘΗΚΗ ΕΔΩ ---
+        // Αν υπάρχουν αρχεία στον TransferManager (π.χ. από το CoreELEC)
+        // εμφάνισε το κουμπί Paste της MainActivity
+        if (TransferManager.filesToMove.isNotEmpty()) {
+            binding.fabPaste.show()
+        } else {
+            // Αν είναι άδειο, κρύψτο (προαιρετικά)
+            binding.fabPaste.hide()
+        }
     }
 
     private fun checkPermissions() {
@@ -433,6 +456,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun pasteFile() {
+        // 1. ΕΛΕΓΧΟΣ: Μήπως έρχονται αρχεία από το CoreELEC;
+        if (TransferManager.filesToMove.isNotEmpty() && TransferManager.sourceIsSmb) {
+            executeLocalPaste() // Καλεί την ειδική συνάρτηση για SMB Download
+            return
+        }
+
+        // 2. Αν όχι, συνεχίζουμε με τα τοπικά αρχεία (Root Paste)
         val filesToProcess = if (fileToMove != null) listOf(fileToMove!!) else bulkFilesToMove
         if (filesToProcess.isEmpty()) return
 
@@ -440,7 +470,6 @@ class MainActivity : AppCompatActivity() {
             binding.progressBar.visibility = View.VISIBLE
             var allSuccess = true
 
-            // 1. Μετατροπή του currentPath στην πραγματική Root διαδρομή
             val rawDestDir = currentPath.absolutePath
             val realDestDir = if (rawDestDir.startsWith("/storage/emulated/0")) {
                 rawDestDir.replace("/storage/emulated/0", "/data/media/0")
@@ -448,18 +477,11 @@ class MainActivity : AppCompatActivity() {
                 rawDestDir
             }
 
-            // 2. Έλεγχος αν γράφουμε σε σύστημα
-            val isSystemTarget = realDestDir.startsWith("/system") ||
-                    realDestDir.startsWith("/vendor") ||
-                    realDestDir == "/"
-
-            if (isSystemTarget) {
-                RootTools.unlockSystem()
-            }
+            val isSystemTarget = realDestDir.startsWith("/system") || realDestDir.startsWith("/vendor") || realDestDir == "/"
+            if (isSystemTarget) RootTools.unlockSystem()
 
             withContext(Dispatchers.IO) {
                 filesToProcess.forEach { model ->
-                    // Μετατροπή και της πηγής (source) σε real path αν χρειάζεται
                     val rawSourcePath = model.path
                     val realSourcePath = if (rawSourcePath.startsWith("/storage/emulated/0")) {
                         rawSourcePath.replace("/storage/emulated/0", "/data/media/0")
@@ -471,37 +493,70 @@ class MainActivity : AppCompatActivity() {
                     val finalDestPath = "$realDestDir/$fileName".replace("//", "/")
 
                     try {
-                        val command = if (isCutOperation) {
-                            "mv '$realSourcePath' '$finalDestPath'"
-                        } else {
-                            "cp -r '$realSourcePath' '$finalDestPath'"
-                        }
-
-                        // Εκτέλεση μέσω RootTools
+                        val command = if (isCutOperation) "mv '$realSourcePath' '$finalDestPath'" else "cp -r '$realSourcePath' '$finalDestPath'"
                         val result = RootTools.executeSilent(command)
                         if (!result) allSuccess = false
-
                     } catch (e: Exception) {
                         allSuccess = false
                     }
                 }
             }
 
-            if (isSystemTarget) {
-                RootTools.lockSystem()
-            }
-
+            if (isSystemTarget) RootTools.lockSystem()
             binding.progressBar.visibility = View.GONE
             loadFiles(currentPath)
             binding.fabPaste.hide()
             fileToMove = null
             bulkFilesToMove = emptyList()
+            Toast.makeText(this@MainActivity, if (allSuccess) "Ολοκληρώθηκε!" else "Αποτυχία", Toast.LENGTH_SHORT).show()
+        }
+    }
 
-            Toast.makeText(
-                this@MainActivity,
-                if (allSuccess) "Η επιχείρηση ολοκληρώθηκε!" else "Αποτυχία σε κάποια αρχεία",
-                Toast.LENGTH_SHORT
-            ).show()
+    private fun executeLocalPaste() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                withContext(Dispatchers.Main) { binding.progressBar.visibility = View.VISIBLE }
+
+                // ΔΙΟΡΘΩΣΗ: Χρήση του currentPath που ήδη έχεις στην Activity
+                val targetDir = currentPath
+
+                TransferManager.filesToMove.forEach { model ->
+                    // Δημιουργία SMB Context για το Download
+                    val props = java.util.Properties()
+                    props.setProperty("jcifs.smb.client.dfs.disabled", "true")
+                    val config = org.codelibs.jcifs.smb.config.PropertyConfiguration(props)
+                    val baseContext = org.codelibs.jcifs.smb.context.BaseContext(config)
+                    val auth = org.codelibs.jcifs.smb.impl.NtlmPasswordAuthenticator(
+                        null, TransferManager.smbUser, TransferManager.smbPass
+                    )
+                    val smbContext = baseContext.withCredentials(auth)
+
+                    val smbSource = org.codelibs.jcifs.smb.impl.SmbFile(model.path, smbContext)
+                    val localDest = File(targetDir, smbSource.name)
+
+                    // Ροή δεδομένων (Download)
+                    smbSource.inputStream.use { input ->
+                        localDest.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+
+                    if (TransferManager.isCut) smbSource.delete()
+                }
+
+                withContext(Dispatchers.Main) {
+                    binding.progressBar.visibility = View.GONE
+                    loadFiles(currentPath) // Φρεσκάρισμα της λίστας στο κινητό
+                    TransferManager.filesToMove = emptyList() // Άδειασμα "clipboard"
+                    binding.fabPaste.hide()
+                    Toast.makeText(this@MainActivity, "Λήψη από CoreELEC επιτυχής!", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    binding.progressBar.visibility = View.GONE
+                    Toast.makeText(this@MainActivity, "Σφάλμα Download: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
         }
     }
 

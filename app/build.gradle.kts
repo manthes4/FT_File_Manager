@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.ft_file_manager"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -92,4 +92,10 @@ dependencies {
     implementation("com.hierynomus:asn-one:0.6.0")
 
     implementation("org.codelibs:jcifs:3.0.2")
+
+    // Για το lifecycleScope (Coroutines με Activity)
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2") // Χρησιμοποίησε την τελευταία έκδοση
+
+    // Επίσης βεβαιώσου ότι έχεις και αυτά για τις Coroutines γενικά
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 }
