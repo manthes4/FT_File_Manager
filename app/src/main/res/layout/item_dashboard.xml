@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginStart="5dp"
-    android:layout_marginTop="25dp"
+    android:layout_marginTop="18dp"
     android:layout_marginEnd="5dp"
     android:clickable="true"
     android:focusable="true"
@@ -17,7 +17,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:padding="13dp">
 
         <ImageView
             android:id="@+id/itemIcon"

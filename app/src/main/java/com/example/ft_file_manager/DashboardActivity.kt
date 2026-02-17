@@ -95,7 +95,7 @@ class DashboardActivity : AppCompatActivity() {
     private fun updateDrawerMenu() {
         val navigationView = findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
         val menu = navigationView.menu
-        menu.removeGroup(R.id.group_favorites) // Καθαρισμός
+        menu.removeGroup(R.id.group_favorites)
 
         val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
         val savedPaths = prefs.getString("paths_ordered", "") ?: ""
@@ -109,23 +109,32 @@ class DashboardActivity : AppCompatActivity() {
 
                     val menuItem = menu.add(R.id.group_favorites, android.view.View.generateViewId(), 100, displayName)
 
-                    // ΕΛΕΓΧΟΣ: Αν είναι FTP βάλε το εικονίδιο share/ftp, αλλιώς folder
-                    if (realPath.startsWith("ftp://")) {
-                        menuItem.setIcon(android.R.drawable.ic_menu_share) // Ή το δικό σου ic_ftp
-                    } else {
-                        menuItem.setIcon(R.drawable.ic_folder_yellow)
+                    // 1. Εικονίδιο ανάλογα με τον τύπο
+                    when {
+                        realPath.startsWith("ftp://") -> menuItem.setIcon(android.R.drawable.ic_menu_share)
+                        realPath.startsWith("smb://") -> menuItem.setIcon(R.drawable.ic_root) // Βάλε ένα εικονίδιο δικτύου εδώ
+                        else -> menuItem.setIcon(R.drawable.ic_folder_yellow)
                     }
 
+                    // 2. Διαχείριση κλικ ανάλογα με το πρόθεμα (Protocol)
                     menuItem.setOnMenuItemClickListener {
-                        if (realPath.startsWith("ftp://")) {
-                            // Αν είναι FTP, άνοιξε την FtpActivity
-                            val host = realPath.replace("ftp://", "")
-                            val intent = Intent(this, FtpActivity::class.java)
-                            intent.putExtra("TARGET_HOST", host)
-                            startActivity(intent)
-                        } else {
-                            // Αν είναι φάκελος, κάλεσε την openPath που ήδη έχεις
-                            openPath(realPath)
+                        when {
+                            realPath.startsWith("ftp://") -> {
+                                val host = realPath.replace("ftp://", "")
+                                val intent = Intent(this, FtpActivity::class.java)
+                                intent.putExtra("TARGET_HOST", host)
+                                startActivity(intent)
+                            }
+                            realPath.startsWith("smb://") -> {
+                                // Ανοίγουμε την NetworkClientActivity για τα SMB αγαπημένα
+                                val intent = Intent(this, NetworkClientActivity::class.java)
+                                intent.putExtra("TARGET_SMB_PATH", realPath)
+                                startActivity(intent)
+                            }
+                            else -> {
+                                // Τοπικός φάκελος (Internal, SD, Root)
+                                openPath(realPath)
+                            }
                         }
                         true
                     }
@@ -144,41 +153,55 @@ class DashboardActivity : AppCompatActivity() {
     private fun setupItems() {
         storageItems.clear()
 
-        // 1. Βασικές μονάδες (ID 1-4)
+        // --- ΣΕΙΡΑ: Internal, SD Card, Downloads, Root, FTP Server, SMB/SFTP ---
+
+        // 1. Internal (ID 1)
         val internalPath = Environment.getExternalStorageDirectory().absolutePath
         storageItems.add(DashboardItem(1, "Internal", internalPath, R.drawable.ic_phone))
 
+        // 2. SD Card (ID 2)
         val sdPath = getExternalSDPath()
         if (sdPath != null) {
             storageItems.add(DashboardItem(2, "SD Card", sdPath, R.drawable.ic_sd))
         }
 
+        // 3. Downloads (ID 6)
+        val downloadsPath = File(Environment.getExternalStorageDirectory(), "Download").absolutePath
+        storageItems.add(DashboardItem(6, "Downloads", downloadsPath, R.drawable.ic_folder_yellow))
+
+        // 4. Root (ID 3)
         storageItems.add(DashboardItem(3, "Root", "/", R.drawable.ic_root))
+
+        // 5. FTP Server (ID 4) - Η εφαρμογή σου ως Server
         storageItems.add(DashboardItem(4, "FTP Server", null, R.drawable.ic_ftp))
 
-        // 2. Προσθήκη Pinned Φακέλων (ID 5) - Μόνο για το Dashboard
-        // 2. Προσθήκη Pinned Φακέλων
+        // 6. SMB/SFTP Network (ID 7) - Σύνδεση σε άλλες συσκευές
+        storageItems.add(DashboardItem(7, "Network SMB", "network_global", R.drawable.ic_root)) // Χρησιμοποίησε ένα εικονίδιο δικτύου αν έχεις
+
+        // --- 2. Pinned Φακέλων (ID 5) ---
         val prefsDash = getSharedPreferences("dashboard_pins", MODE_PRIVATE)
         var savedPins = prefsDash.getString("paths", "") ?: ""
 
-// ΑΝ ΕΙΝΑΙ ΑΔΕΙΟ: Διάβασε από τα favorites του Drawer για να μην είναι κενό την πρώτη φορά
         if (savedPins.isEmpty()) {
             val prefsFav = getSharedPreferences("favorites", MODE_PRIVATE)
             savedPins = prefsFav.getString("paths_ordered", "") ?: ""
-            // Προαιρετικά: Σώσε τα αμέσως στα pins για να γίνει ο συγχρονισμός
             prefsDash.edit().putString("paths", savedPins).apply()
         }
 
         if (savedPins.isNotEmpty()) {
             savedPins.split("|").forEach { entry ->
                 val parts = entry.split("*")
-                if (parts.size == 2 && File(parts[1]).exists()) {
-                    storageItems.add(DashboardItem(5, parts[0], parts[1], R.drawable.ic_folder_yellow))
+                if (parts.size == 2) {
+                    val path = parts[1]
+                    // Προσθήκη αν είναι τοπικό αρχείο που υπάρχει ή αν είναι δικτυακό (smb/ftp)
+                    if (path.startsWith("smb://") || path.startsWith("ftp://") || File(path).exists()) {
+                        storageItems.add(DashboardItem(5, parts[0], path, R.drawable.ic_folder_yellow))
+                    }
                 }
             }
         }
 
-        // Υπολογισμός χώρου για όλα τα items
+        // Υπολογισμός χώρου ΜΟΝΟ για όσα είναι τοπικά paths
         storageItems.forEach { updateSpaceInfo(it) }
 
         adapter.notifyDataSetChanged()
@@ -191,7 +214,12 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun updateSpaceInfo(item: DashboardItem) {
-        if (item.path == null) return
+        // Αν δεν υπάρχει path ή αν είναι εικονικό/δικτυακό, μην προχωράς
+        if (item.path == null || item.id == 4 || item.id == 7 || item.path!!.startsWith("smb://")) {
+            item.totalSpace = "" // Προαιρετικά άδειασέ το
+            return
+        }
+
         try {
             val file = File(item.path!!)
             if (!file.exists()) return
@@ -221,12 +249,29 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun onItemClick(item: DashboardItem) {
-        if (item.id == 4) {
-            startActivity(Intent(this, FtpActivity::class.java))
-        } else {
-            val intent = Intent(this, MainActivity::class.java)
-            intent.putExtra("START_PATH", item.path)
-            startActivity(intent)
+        when (item.id) {
+            4 -> { // FTP Server (Local Server)
+                startActivity(Intent(this, FtpActivity::class.java))
+            }
+            7 -> { // Network SMB/SFTP (Client)
+                startActivity(Intent(this, NetworkClientActivity::class.java))
+            }
+            else -> {
+                // Για Internal, SD, Downloads, Root και Pinned
+                val path = item.path ?: ""
+
+                if (path.startsWith("smb://")) {
+                    // Αν είναι καρφιτσωμένο SMB, άνοιξε τον Client
+                    val intent = Intent(this, NetworkClientActivity::class.java)
+                    intent.putExtra("TARGET_SMB_PATH", path)
+                    startActivity(intent)
+                } else {
+                    // Για όλα τα τοπικά αρχεία
+                    val intent = Intent(this, MainActivity::class.java)
+                    intent.putExtra("START_PATH", path)
+                    startActivity(intent)
+                }
+            }
         }
     }
 
