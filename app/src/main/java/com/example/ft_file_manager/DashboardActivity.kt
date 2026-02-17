@@ -95,52 +95,116 @@ class DashboardActivity : AppCompatActivity() {
     private fun updateDrawerMenu() {
         val navigationView = findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
         val menu = navigationView.menu
+
+        // Καθαρισμός προηγούμενων για να μην διπλασιάζονται
         menu.removeGroup(R.id.group_favorites)
 
         val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
         val savedPaths = prefs.getString("paths_ordered", "") ?: ""
 
         if (savedPaths.isNotEmpty()) {
-            savedPaths.split("|").forEach { entry ->
+            val entries = savedPaths.split("|").filter { it.isNotEmpty() }
+
+            entries.forEachIndexed { index, entry ->
                 val parts = entry.split("*")
                 if (parts.size == 2) {
                     val displayName = parts[0]
                     val realPath = parts[1]
 
-                    val menuItem = menu.add(R.id.group_favorites, android.view.View.generateViewId(), 100, displayName)
+                    val menuItem = menu.add(R.id.group_favorites, index, index, displayName)
 
-                    // 1. Εικονίδιο ανάλογα με τον τύπο
+                    // Ορισμός εικονιδίου
                     when {
                         realPath.startsWith("ftp://") -> menuItem.setIcon(android.R.drawable.ic_menu_share)
-                        realPath.startsWith("smb://") -> menuItem.setIcon(R.drawable.ic_root) // Βάλε ένα εικονίδιο δικτύου εδώ
+                        realPath.startsWith("smb://") -> menuItem.setIcon(R.drawable.ic_root)
                         else -> menuItem.setIcon(R.drawable.ic_folder_yellow)
                     }
 
-                    // 2. Διαχείριση κλικ ανάλογα με το πρόθεμα (Protocol)
+                    // Σύνδεση με το Custom Layout που έχει τα κουμπιά Rename/Delete
+                    menuItem.setActionView(R.layout.menu_item_favorite)
+                    val actionView = menuItem.actionView
+
+                    actionView?.findViewById<android.widget.ImageButton>(R.id.btnRenameFavorite)?.setOnClickListener {
+                        showRenameFavoriteDialog(entry, index)
+                    }
+
+                    actionView?.findViewById<android.widget.ImageButton>(R.id.btnRemoveFavorite)?.setOnClickListener {
+                        showRemoveFavoriteDialog(entry)
+                    }
+
                     menuItem.setOnMenuItemClickListener {
                         when {
                             realPath.startsWith("ftp://") -> {
                                 val host = realPath.replace("ftp://", "")
-                                val intent = Intent(this, FtpActivity::class.java)
-                                intent.putExtra("TARGET_HOST", host)
+                                val intent = Intent(this, FtpActivity::class.java).apply {
+                                    putExtra("TARGET_HOST", host)
+                                }
                                 startActivity(intent)
                             }
                             realPath.startsWith("smb://") -> {
-                                // Ανοίγουμε την NetworkClientActivity για τα SMB αγαπημένα
-                                val intent = Intent(this, NetworkClientActivity::class.java)
-                                intent.putExtra("TARGET_SMB_PATH", realPath)
+                                val intent = Intent(this, NetworkClientActivity::class.java).apply {
+                                    putExtra("TARGET_SMB_PATH", realPath)
+                                }
                                 startActivity(intent)
                             }
-                            else -> {
-                                // Τοπικός φάκελος (Internal, SD, Root)
-                                openPath(realPath)
-                            }
+                            else -> openPath(realPath)
                         }
+                        findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout).closeDrawers()
                         true
                     }
                 }
             }
         }
+    }
+
+    private fun showRenameFavoriteDialog(oldEntry: String, index: Int) {
+        val parts = oldEntry.split("*")
+        val currentName = parts[0]
+        val path = parts[1]
+
+        val input = android.widget.EditText(this)
+        input.setText(currentName)
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Μετονομασία Αγαπημένου")
+            .setView(input)
+            .setPositiveButton("ΟΚ") { _, _ ->
+                val newName = input.text.toString()
+                if (newName.isNotEmpty()) {
+                    val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
+                    val savedPaths = prefs.getString("paths_ordered", "") ?: ""
+                    val entries = savedPaths.split("|").toMutableList()
+
+                    // Ενημέρωση της συγκεκριμένης εγγραφής
+                    entries[index] = "$newName*$path"
+
+                    prefs.edit().putString("paths_ordered", entries.joinToString("|")).apply()
+                    updateDrawerMenu() // Refresh το μενού
+                    setupItems()       // Refresh τις κάρτες αν το έχεις κάνει Pin
+                }
+            }
+            .setNegativeButton("Άκυρο", null)
+            .show()
+    }
+
+    private fun showRemoveFavoriteDialog(entryToRemove: String) {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Διαγραφή Αγαπημένου")
+            .setMessage("Θέλετε να αφαιρέσετε το '${entryToRemove.split("*")[0]}' από τα αγαπημένα;")
+            .setPositiveButton("Διαγραφή") { _, _ ->
+                val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
+                val savedPaths = prefs.getString("paths_ordered", "") ?: ""
+
+                val newPaths = savedPaths.split("|")
+                    .filter { it != entryToRemove && it.isNotEmpty() }
+                    .joinToString("|")
+
+                prefs.edit().putString("paths_ordered", newPaths).apply()
+                updateDrawerMenu()
+                setupItems()
+            }
+            .setNegativeButton("Άκυρο", null)
+            .show()
     }
 
     // Μην ξεχάσεις να την καλέσεις στην onResume!
