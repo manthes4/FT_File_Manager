@@ -107,30 +107,19 @@ class FileAdapter(
 
         // 3. Selection UI
         holder.itemView.setBackgroundColor(
-            if (fileModel.isSelected) Color.parseColor("#D3D3D3") else Color.TRANSPARENT
+            if (fileModel.isSelected) Color.parseColor("#4D2196F3") else Color.TRANSPARENT
         )
 
-        // 4. Click Listeners (Long Click & Simple Click)
+        // 4. Click Listeners - ΜΟΝΟ ΑΥΤΑ ΤΑ ΔΥΟ ΧΡΕΙΑΖΟΝΤΑΙ
         holder.itemView.setOnLongClickListener {
-            if (!isInSelectionMode) {
-                fileModel.isSelected = true
-                isInSelectionMode = true
-                notifyDataSetChanged()
-                onItemLongClick(fileModel)
-            }
+            onItemLongClick(fileModel)
             true
         }
 
         holder.itemView.setOnClickListener {
-            if (isInSelectionMode) {
-                fileModel.isSelected = !fileModel.isSelected
-                notifyItemChanged(position)
-                onSelectionChanged()
-            } else {
-                onItemClick(fileModel)
-            }
+            onItemClick(fileModel)
         }
-    }
+    } // Εδώ κλείνει η onBindViewHolder
 
     override fun getItemCount() = files.size
 }
