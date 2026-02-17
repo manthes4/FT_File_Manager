@@ -2,14 +2,21 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Σύνδεση σε απομακρυσμένο Server"
+        android:textStyle="bold"
+        android:textColor="?attr/colorPrimary"/>
 
     <LinearLayout
         android:id="@+id/loginLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:orientation="vertical">
 
         <EditText android:id="@+id/etHost" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Host (π.χ. 192.168.1.5)" />
         <EditText android:id="@+id/etUser" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Username" />
@@ -17,6 +24,26 @@
 
         <Button android:id="@+id/btnConnect" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Σύνδεση" />
     </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="2dp"
+        android:layout_marginVertical="16dp"
+        android:background="#CCCCCC" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Ο δικός μου FTP Server"
+        android:textStyle="bold"
+        android:textColor="?attr/colorPrimary"/>
+
+    <EditText android:id="@+id/etServerUser" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Ορισμός User" android:text="admin" />
+    <EditText android:id="@+id/etServerPass" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Ορισμός Pass" android:inputType="textPassword" android:text="1234" />
+
+    <TextView android:id="@+id/tvServerInfo" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="IP: --" android:padding="8dp" android:textAlignment="center"/>
+
+    <Button android:id="@+id/btnStartServer" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Έναρξη Server" android:backgroundTint="#4CAF50" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/ftpRecyclerView"

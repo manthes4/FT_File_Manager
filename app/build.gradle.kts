@@ -98,4 +98,6 @@ dependencies {
 
     // Επίσης βεβαιώσου ότι έχεις και αυτά για τις Coroutines γενικά
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    implementation("org.apache.ftpserver:ftpserver-core:1.1.1")
 }

@@ -17,6 +17,7 @@ class FtpActivity : AppCompatActivity() {
     private lateinit var binding: ActivityFtpBinding
     private val ftpClient = FTPClient()
     private var currentFtpPath = "/"
+    private var ftpServer: org.apache.ftpserver.FtpServer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -25,34 +26,31 @@ class FtpActivity : AppCompatActivity() {
 
         val prefs = getSharedPreferences("ftp_prefs", MODE_PRIVATE)
 
-        // 1. Πρώτα παίρνουμε τα τελευταία αποθηκευμένα στοιχεία
+        // --- ΛΕΙΤΟΥΡΓΙΑ CLIENT (Σύνδεση σε άλλους) ---
+
         val lastHost = prefs.getString("last_host", "")
         val lastUser = prefs.getString("last_user", "")
         val lastPass = prefs.getString("last_pass", "")
 
-        // 2. ΕΛΕΓΧΟΣ: Μήπως ερχόμαστε από τα Αγαπημένα της MainActivity;
         val targetHost = intent.getStringExtra("TARGET_HOST")
 
         if (targetHost != null) {
-            // Αν πατήσαμε αγαπημένο, βάζουμε το Host του αγαπημένου
             binding.etHost.setText(targetHost)
         } else {
-            // Αν ανοίξαμε την οθόνη κανονικά, βάζουμε το τελευταίο χρησιμοποιημένο Host
             binding.etHost.setText(lastHost)
         }
 
-        // Συμπλήρωση User/Pass από τα αποθηκευμένα (αν υπάρχουν)
         binding.etUser.setText(lastUser)
         binding.etPass.setText(lastPass)
 
         binding.ftpRecyclerView.layoutManager = LinearLayoutManager(this)
 
+        // Κουμπί Σύνδεσης ως Client
         binding.btnConnect.setOnClickListener {
             val host = binding.etHost.text.toString()
             val user = binding.etUser.text.toString()
             val pass = binding.etPass.text.toString()
 
-            // Αποθήκευση για την επόμενη φορά
             prefs.edit().apply {
                 putString("last_host", host)
                 putString("last_user", user)
@@ -61,6 +59,33 @@ class FtpActivity : AppCompatActivity() {
             }
 
             if (host.isNotEmpty()) connectToFtp(host, user, pass)
+        }
+
+        // --- ΛΕΙΤΟΥΡΓΙΑ SERVER (Το δικό μου κινητό) ---
+
+        // Φόρτωση προεπιλεγμένων στοιχείων για τον δικό σου Server (προαιρετικά από prefs)
+        val lastServerUser = prefs.getString("server_user", "admin")
+        val lastServerPass = prefs.getString("server_pass", "1234")
+        binding.etServerUser.setText(lastServerUser)
+        binding.etServerPass.setText(lastServerPass)
+
+        // --- Εμφάνιση IP με το που ανοίγει η οθόνη ---
+        val ip = getWifiIPAddress()
+        binding.tvServerInfo.text = "Η IP σου: $ip\n(Port: 2121)"
+
+        // Κουμπί Έναρξης/Διακοπής Server
+        binding.btnStartServer.setOnClickListener {
+            if (ftpServer == null) {
+                // Αποθήκευση των στοιχείων που όρισες για τον server
+                prefs.edit().apply {
+                    putString("server_user", binding.etServerUser.text.toString())
+                    putString("server_pass", binding.etServerPass.text.toString())
+                    apply()
+                }
+                startFtpServer()
+            } else {
+                stopFtpServer()
+            }
         }
     }
 
@@ -290,5 +315,78 @@ class FtpActivity : AppCompatActivity() {
             }
             .setNegativeButton("Όχι", null)
             .show()
+    }
+
+    private fun startFtpServer() {
+        val user = binding.etServerUser.text.toString()
+        val pass = binding.etServerPass.text.toString()
+
+        val serverFactory = org.apache.ftpserver.FtpServerFactory()
+        val factory = org.apache.ftpserver.listener.ListenerFactory()
+        factory.port = 2121 // Χρησιμοποιούμε 2121 γιατί το 21 θέλει root στο Android
+
+        serverFactory.addListener("default", factory.createListener())
+
+        // Ρύθμιση Χρήστη
+        val userFactory = org.apache.ftpserver.usermanager.impl.WriteRequest()
+        val userBuilder = org.apache.ftpserver.usermanager.UserFactory()
+        userBuilder.name = user
+        userBuilder.password = pass
+        userBuilder.homeDirectory = Environment.getExternalStorageDirectory().absolutePath
+
+        val authorities = mutableListOf<org.apache.ftpserver.ftplet.Authority>()
+        authorities.add(org.apache.ftpserver.usermanager.impl.WritePermission())
+        userBuilder.authorities = authorities
+
+        serverFactory.userManager.save(userBuilder.createUser())
+
+        try {
+            ftpServer = serverFactory.createServer()
+            ftpServer?.start()
+
+            val ip = getWifiIPAddress()
+            binding.tvServerInfo.text = "Server Ενεργός!\nΣύνδεση σε: ftp://$ip:2121"
+            binding.btnStartServer.text = "Διακοπή Server"
+            binding.btnStartServer.backgroundTintList =
+                android.content.res.ColorStateList.valueOf(android.graphics.Color.RED)
+
+            Toast.makeText(this, "Ο Server ξεκίνησε!", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Σφάλμα: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun stopFtpServer() {
+        ftpServer?.stop()
+        ftpServer = null
+        binding.tvServerInfo.text = "IP: --"
+        binding.btnStartServer.text = "Έναρξη Server"
+        binding.btnStartServer.backgroundTintList =
+            android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#4CAF50"))
+        Toast.makeText(this, "Ο Server σταμάτησε", Toast.LENGTH_SHORT).show()
+    }
+
+    // Βοηθητική συνάρτηση για την IP
+    private fun getWifiIPAddress(): String {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val iface = interfaces.nextElement()
+                // Φιλτράρουμε τις διεπαφές (θέλουμε wlan0 για Wi-Fi)
+                if (iface.isLoopback || !iface.isUp) continue
+
+                val addresses = iface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val addr = addresses.nextElement()
+                    // Θέλουμε μόνο IPv4 διευθύνσεις (π.χ. 192.168.x.x)
+                    if (addr is java.net.Inet4Address) {
+                        return addr.hostAddress
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return "Μη διαθέσιμη"
     }
 }
