@@ -221,7 +221,7 @@ class DashboardActivity : AppCompatActivity() {
 
         // 1. Internal (ID 1)
         val internalPath = Environment.getExternalStorageDirectory().absolutePath
-        storageItems.add(DashboardItem(1, "Internal", internalPath, R.drawable.ic_phone))
+        storageItems.add(DashboardItem(1, "Internal Storage", internalPath, R.drawable.ic_phone))
 
         // 2. SD Card (ID 2)
         val sdPath = getExternalSDPath()
@@ -231,7 +231,7 @@ class DashboardActivity : AppCompatActivity() {
 
         // 3. Downloads (ID 6)
         val downloadsPath = File(Environment.getExternalStorageDirectory(), "Download").absolutePath
-        storageItems.add(DashboardItem(6, "Downloads", downloadsPath, R.drawable.ic_folder_yellow))
+        storageItems.add(DashboardItem(6, "Download", downloadsPath, R.drawable.ic_folder_yellow))
 
         // 4. Root (ID 3)
         storageItems.add(DashboardItem(3, "Root", "/", R.drawable.ic_root))
@@ -240,7 +240,7 @@ class DashboardActivity : AppCompatActivity() {
         storageItems.add(DashboardItem(4, "FTP Server", null, R.drawable.ic_ftp))
 
         // 6. SMB/SFTP Network (ID 7) - Σύνδεση σε άλλες συσκευές
-        storageItems.add(DashboardItem(7, "Network SMB", "network_global", R.drawable.ic_root)) // Χρησιμοποίησε ένα εικονίδιο δικτύου αν έχεις
+        storageItems.add(DashboardItem(7, "Network SMB/SFTP", "network_global", R.drawable.ic_ftp)) // Χρησιμοποίησε ένα εικονίδιο δικτύου αν έχεις
 
         // --- 2. Pinned Φακέλων (ID 5) ---
         val prefsDash = getSharedPreferences("dashboard_pins", MODE_PRIVATE)
