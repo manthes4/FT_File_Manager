@@ -214,14 +214,6 @@ class NetworkFileActivity : AppCompatActivity() {
                 showNewFolderDialog()
                 return true
             }
-            R.id.action_share -> {
-                if (selectedFiles.size == 1) {
-                    shareFileFromNetwork(selectedFiles[0])
-                } else {
-                    Toast.makeText(this, "Επιλέξτε ένα αρχείο για share", Toast.LENGTH_SHORT).show()
-                }
-                return true
-            }
         }
         return super.onOptionsItemSelected(item)
     }
@@ -309,54 +301,7 @@ class NetworkFileActivity : AppCompatActivity() {
             }.setNegativeButton("Όχι", null).show()
     }
 
-    private fun shareFileFromNetwork(fileModel: FileModel) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                // 1. Ενημέρωση χρήστη στην κύρια thread
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@NetworkFileActivity, "Προετοιμασία αρχείου για κοινή χρήση...", Toast.LENGTH_SHORT).show()
-                }
 
-                val source = SmbFile(fileModel.path, smbContext!!)
-                val tempFile = java.io.File(cacheDir, fileModel.name)
-
-                // 2. Κατέβασμα αρχείου στην cache με χρήση Buffer
-                org.codelibs.jcifs.smb.impl.SmbFileInputStream(source).use { input ->
-                    java.io.FileOutputStream(tempFile).use { output ->
-                        val buffer = ByteArray(16384) // 16KB buffer
-                        var bytesRead: Int
-                        while (input.read(buffer).also { bytesRead = it } != -1) {
-                            output.write(buffer, 0, bytesRead)
-                        }
-                        output.flush()
-                    }
-                }
-
-                // 3. Δημιουργία του URI και εκτέλεση του Share στην Main Thread
-                withContext(Dispatchers.Main) {
-                    // Μέσα στη shareFileFromNetwork, στο βήμα 3:
-                    val contentUri = androidx.core.content.FileProvider.getUriForFile(
-                        this@NetworkFileActivity,
-                        "com.example.ft_file_manager.fileprovider", // Βάλε το Package Name σου ΧΕΙΡΟΚΙΝΗΤΑ για σιγουριά
-                        tempFile
-                    )
-
-                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = contentResolver.getType(contentUri) ?: "*/*"
-                        putExtra(Intent.EXTRA_STREAM, contentUri)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) // ΠΟΛΥ ΣΗΜΑΝΤΙΚΟ
-                    }
-
-// Δημιουργία chooser και προσθήκη του flag και εκεί
-                    val chooser = Intent.createChooser(shareIntent, "Κοινοποίηση")
-                    chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    startActivity(chooser)
-                }
-            } catch (e: Exception) {
-                showError("Share Error: ${e.message}")
-            }
-        }
-    }
 
     private fun preparePaste(files: List<FileModel>, isCut: Boolean) {
         this.smbFilesToMove = files
