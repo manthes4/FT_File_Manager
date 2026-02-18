@@ -125,23 +125,38 @@ class DashboardActivity : AppCompatActivity() {
 
                     val menuItem = menu.add(R.id.group_favorites, index, index, displayName)
 
-                    // Ορισμός εικονιδίου
+// Ορισμός εικονιδίου
                     when {
                         realPath.startsWith("ftp://") -> menuItem.setIcon(android.R.drawable.ic_menu_share)
                         realPath.startsWith("smb://") -> menuItem.setIcon(R.drawable.ic_root)
                         else -> menuItem.setIcon(R.drawable.ic_folder_yellow)
                     }
 
-                    // Σύνδεση με το Custom Layout που έχει τα κουμπιά Rename/Delete
+// Σύνδεση με το αόρατο πλέον layout για το Long Click
                     menuItem.setActionView(R.layout.menu_item_favorite)
                     val actionView = menuItem.actionView
 
-                    actionView?.findViewById<android.widget.ImageButton>(R.id.btnRenameFavorite)?.setOnClickListener {
-                        showRenameFavoriteDialog(entry, index)
+// ... (μέσα στο loop των entries)
+
+                    val drawer = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
+
+// 1. Απλό κλικ στο ActionView
+                    actionView?.setOnClickListener {
+                        handleFavoriteClick(realPath)
+                        drawer.closeDrawers() // Χρήση της τοπικής μεταβλητής drawer
                     }
 
-                    actionView?.findViewById<android.widget.ImageButton>(R.id.btnRemoveFavorite)?.setOnClickListener {
-                        showRemoveFavoriteDialog(entry)
+// 2. Long Click για το Popup Menu
+                    actionView?.setOnLongClickListener {
+                        showFavoritePopupMenu(it, entry, index)
+                        true
+                    }
+
+                    // 3. Fallback κλικ στο ίδιο το MenuItem
+                    menuItem.setOnMenuItemClickListener {
+                        handleFavoriteClick(realPath)
+                        drawer.closeDrawers()
+                        true
                     }
 
                     menuItem.setOnMenuItemClickListener {
@@ -184,6 +199,48 @@ class DashboardActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun handleFavoriteClick(realPath: String) {
+        when {
+            realPath.startsWith("ftp://") -> {
+                val host = realPath.replace("ftp://", "")
+                val intent = Intent(this, FtpActivity::class.java).apply {
+                    putExtra("TARGET_HOST", host)
+                }
+                startActivity(intent)
+            }
+            realPath.startsWith("smb://") -> {
+                val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
+                val savedUser = netPrefs.getString("user_$realPath", null)
+                    ?: netPrefs.getString("user_${realPath.removePrefix("smb://")}", "")
+                val savedPass = netPrefs.getString("pass_$realPath", null)
+                    ?: netPrefs.getString("pass_${realPath.removePrefix("smb://")}", "")
+
+                val intent = Intent(this, NetworkClientActivity::class.java).apply {
+                    putExtra("TARGET_SMB_PATH", realPath)
+                    putExtra("SMB_USER", savedUser)
+                    putExtra("SMB_PASS", savedPass)
+                }
+                startActivity(intent)
+            }
+            else -> openPath(realPath)
+        }
+    }
+
+    private fun showFavoritePopupMenu(view: View, entry: String, index: Int) {
+        val popup = androidx.appcompat.widget.PopupMenu(this, view)
+        popup.menu.add("Μετονομασία")
+        popup.menu.add("Διαγραφή")
+
+        popup.setOnMenuItemClickListener { item ->
+            when (item.title) {
+                "Μετονομασία" -> showRenameFavoriteDialog(entry, index)
+                "Διαγραφή" -> showRemoveFavoriteDialog(entry)
+            }
+            true
+        }
+        popup.show()
     }
 
     private fun showRenameFavoriteDialog(oldEntry: String, index: Int) {

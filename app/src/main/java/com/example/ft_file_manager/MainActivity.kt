@@ -1036,12 +1036,24 @@ class MainActivity : AppCompatActivity() {
             menuItem.setActionView(R.layout.menu_item_favorite)
             val actionView = menuItem.actionView
 
-            actionView?.findViewById<ImageButton>(R.id.btnRenameFavorite)?.setOnClickListener {
-                showRenameFavoriteDialog(entry, index)
+            // 1. Απλό κλικ
+            actionView?.setOnClickListener {
+                handleFavoriteClickInMain(realPath)
+                binding.drawerLayout.closeDrawers()
             }
 
-            actionView?.findViewById<ImageButton>(R.id.btnRemoveFavorite)?.setOnClickListener {
-                showRemoveFavoriteDialog(entry)
+            // 2. Long Click (Popup Menu)
+            actionView?.setOnLongClickListener {
+                val anchor = it.findViewById<View>(R.id.popupAnchor) ?: it
+                showFavoritePopupMenu(anchor, entry, index)
+                true
+            }
+
+            // 3. MenuItem Click (για σιγουριά)
+            menuItem.setOnMenuItemClickListener {
+                handleFavoriteClickInMain(realPath)
+                binding.drawerLayout.closeDrawers()
+                true
             }
 
             menuItem.setOnMenuItemClickListener {
@@ -1069,6 +1081,60 @@ class MainActivity : AppCompatActivity() {
                 true
             }
         }
+    }
+
+    private fun handleFavoriteClickInMain(realPath: String) {
+        when {
+            realPath.startsWith("ftp://") -> {
+                val host = realPath.replace("ftp://", "")
+                val intent = Intent(this, FtpActivity::class.java).apply {
+                    putExtra("TARGET_HOST", host)
+                }
+                startActivity(intent)
+            }
+
+            realPath.startsWith("smb://") -> {
+                // Χρησιμοποιούμε τη λογική που φτιάξαμε για το SMB
+                val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
+                val savedUser = netPrefs.getString("user_$realPath", null)
+                    ?: netPrefs.getString("user_${realPath.removePrefix("smb://")}", "")
+                val savedPass = netPrefs.getString("pass_$realPath", null)
+                    ?: netPrefs.getString("pass_${realPath.removePrefix("smb://")}", "")
+
+                val intent = Intent(this, NetworkClientActivity::class.java).apply {
+                    putExtra("TARGET_SMB_PATH", realPath)
+                    putExtra("SMB_USER", savedUser)
+                    putExtra("SMB_PASS", savedPass)
+                    putExtra("FAVORITE_SMB_DATA", "SMB: Favorite*$realPath")
+                }
+                startActivity(intent)
+            }
+
+            else -> {
+                // Για τοπικούς φακέλους στη MainActivity
+                val file = java.io.File(realPath)
+                if (file.exists()) {
+                    loadFiles(file) // Ή navigateToPath(realPath) ανάλογα τι έχεις ορίσει
+                } else {
+                    Toast.makeText(this, "Ο φάκελος δεν υπάρχει", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun showFavoritePopupMenu(view: View, entry: String, index: Int) {
+        val popup = androidx.appcompat.widget.PopupMenu(this, view)
+        popup.menu.add("Μετονομασία")
+        popup.menu.add("Διαγραφή")
+
+        popup.setOnMenuItemClickListener { item ->
+            when (item.title) {
+                "Μετονομασία" -> showRenameFavoriteDialog(entry, index)
+                "Διαγραφή" -> showRemoveFavoriteDialog(entry)
+            }
+            true
+        }
+        popup.show()
     }
 
     private fun showRenameFavoriteDialog(oldEntry: String, index: Int) {
