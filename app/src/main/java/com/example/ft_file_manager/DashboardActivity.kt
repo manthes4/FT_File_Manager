@@ -10,9 +10,11 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import java.io.File
 import java.text.DecimalFormat
+import java.util.Collections
 import kotlin.math.log10
 import kotlin.math.pow
 
@@ -91,6 +93,8 @@ class DashboardActivity : AppCompatActivity() {
             { item -> onLongClick(item) }
         )
         recyclerView.adapter = adapter
+
+        setupDrawerDragAndDrop()
     }
 
     private fun updateDrawerMenu() {
@@ -432,5 +436,63 @@ class DashboardActivity : AppCompatActivity() {
         val units = arrayOf("B", "KB", "MB", "GB", "TB")
         val digitGroups = (log10(size.toDouble()) / log10(1024.0)).toInt()
         return DecimalFormat("#,##0.#").format(size / 1024.0.pow(digitGroups.toDouble())) + " " + units[digitGroups]
+    }
+
+    private fun setupDrawerDragAndDrop() {
+        val navigationView = findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
+        // Ο RecyclerView είναι το πρώτο παιδί του NavigationView
+        val navRecycler = navigationView.getChildAt(0) as? RecyclerView ?: return
+
+        val itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+            ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0
+        ) {
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                val fromPos = viewHolder.adapterPosition
+                val toPos = target.adapterPosition
+
+                // Διάβασμα τρέχουσας λίστας από τα Prefs
+                val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
+                val savedPaths = prefs.getString("paths_ordered", "") ?: ""
+                val favoriteList = savedPaths.split("|").filter { it.isNotEmpty() }.toMutableList()
+
+                // Υπολογισμός offset: Η θέση του πρώτου αγαπημένου στον Adapter
+                // Συνήθως είναι μετά τα στατικά items (Internal, Root κλπ) + Header
+                val offset = toPos - (favoriteList.size - 1).coerceAtMost(toPos)
+                // Σημείωση: Αν το offset σου είναι σταθερά 7, αντικατάστησε το παραπάνω με: val offset = 7
+
+                val fromIdx = fromPos - offset
+                val toIdx = toPos - offset
+
+                // Έλεγχος αν είμαστε μέσα στα όρια των αγαπημένων
+                if (fromIdx in favoriteList.indices && toIdx in favoriteList.indices) {
+                    Collections.swap(favoriteList, fromIdx, toIdx)
+
+                    // Αποθήκευση αμέσως στη μνήμη
+                    prefs.edit().putString("paths_ordered", favoriteList.joinToString("|")).apply()
+
+                    // Ενημέρωση του UI για το animation
+                    recyclerView.adapter?.notifyItemMoved(fromPos, toPos)
+                    return true
+                }
+                return false
+            }
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                // Υποχρεωτική override αλλά κενή
+            }
+
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                // Μόλις αφήσει το item, κάνουμε refresh τα πάντα για να συγχρονιστούν
+                updateDrawerMenu()
+                setupItems() // Ενημερώνει και τις κάρτες στο Dashboard αν είναι Pinned
+            }
+        })
+
+        itemTouchHelper.attachToRecyclerView(navRecycler)
     }
 }
