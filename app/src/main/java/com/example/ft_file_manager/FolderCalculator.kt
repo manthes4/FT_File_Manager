@@ -1,7 +1,11 @@
 package com.example.ft_file_manager
 
+import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
+import android.text.SpannableString
+import android.text.SpannableStringBuilder
+import android.text.style.ForegroundColorSpan
 import java.io.File
 import java.text.DecimalFormat
 import java.util.concurrent.Executors
@@ -13,7 +17,6 @@ object FolderCalculator {
     private val executor = Executors.newFixedThreadPool(4)
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // Κλάση για τη μεταφορά όλων των αποτελεσμάτων μαζί
     data class FolderResult(val size: Long, val fileCount: Int, val folderCount: Int)
 
     fun calculateFolderSize(
@@ -29,32 +32,58 @@ object FolderCalculator {
                 val root = File(fileModel.path)
                 val result = getFolderDataRecursive(root)
 
-                // Διαμόρφωση του κειμένου: "X αρ., Y φακ. | Z MB"
-                val infoText = if (result.fileCount == 0 && result.folderCount == 0) {
-                    "Κενός φάκελος"
-                } else {
-                    "${result.fileCount} αρ., ${result.folderCount} φακ. | ${formatSize(result.size)}"
-                }
+                // Δημιουργία του πολύχρωμου κειμένου
+                val spannable = buildColorfulInfo(result.fileCount, result.folderCount, result.size)
 
-                updateUI(fileModel, position, adapter, infoText)
+                mainHandler.post {
+                    // Ενημερώνουμε το model με το string (για την cache)
+                    fileModel.size = spannable.toString()
+                    // Στέλνουμε το Spannable στο payload του adapter
+                    adapter.notifyItemChanged(position, spannable)
+                }
             } catch (e: Exception) {
-                updateUI(fileModel, position, adapter, "Error")
+                mainHandler.post {
+                    fileModel.size = "Error"
+                    adapter.notifyItemChanged(position, "Error")
+                }
             }
         }
     }
 
-    private fun updateUI(fileModel: FileModel, position: Int, adapter: FileAdapter, result: String) {
-        mainHandler.post {
-            fileModel.size = result
-            adapter.notifyItemChanged(position, result)
+    private fun buildColorfulInfo(files: Int, folders: Int, sizeBytes: Long): SpannableStringBuilder {
+        val builder = SpannableStringBuilder()
+
+        if (files == 0 && folders == 0) {
+            builder.append("Κενός φάκελος")
+            return builder
         }
+
+        // 1. Αρχεία (Πράσινο #4CAF50)
+        val filesText = "$files αρχεία,  "
+        val startFiles = builder.length
+        builder.append(filesText)
+        builder.setSpan(ForegroundColorSpan(Color.parseColor("#4CAF50")), startFiles, builder.length - 2, 0)
+
+        // 2. Φάκελοι (Μπλε #2196F3)
+        val foldersText = "$folders φακέλοι,  "
+        val startFolders = builder.length
+        builder.append(foldersText)
+        builder.setSpan(ForegroundColorSpan(Color.parseColor("#2196F3")), startFolders, builder.length - 2, 0)
+
+        // 3. Μέγεθος (Πορτοκαλί #FF9800)
+        val sizeText = formatSize(sizeBytes)
+        val startSize = builder.length
+        builder.append(sizeText)
+        builder.setSpan(ForegroundColorSpan(Color.parseColor("#FF9800")), startSize, builder.length, 0)
+
+        return builder
     }
 
+    // Η αναδρομική συνάρτηση παραμένει ίδια...
     private fun getFolderDataRecursive(file: File): FolderResult {
         var size: Long = 0
         var fileCount = 0
         var folderCount = 0
-
         val files = file.listFiles()
         if (files != null) {
             for (f in files) {

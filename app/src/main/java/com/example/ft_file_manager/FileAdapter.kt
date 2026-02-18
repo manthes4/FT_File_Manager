@@ -33,11 +33,11 @@ class FileAdapter(
 
     override fun onBindViewHolder(holder: FileViewHolder, position: Int, payloads: MutableList<Any>) {
         if (payloads.isNotEmpty()) {
-            // Αν έχουμε payload, σημαίνει ότι ήρθε μόνο το νέο κείμενο μεγέθους
-            val newSizeText = payloads[0] as String
-            holder.info.text = newSizeText // Ενημερώνουμε ΜΟΝΟ το TextView, τίποτα άλλο!
+            // Αλλάζουμε το "as String" σε "as CharSequence"
+            // ώστε να δέχεται και τα χρώματα από το FolderCalculator
+            val newInfo = payloads[0] as CharSequence
+            holder.info.text = newInfo
         } else {
-            // Αν η λίστα payloads είναι άδεια, κάνε την κανονική πλήρη σχεδίαση
             super.onBindViewHolder(holder, position, payloads)
         }
     }
