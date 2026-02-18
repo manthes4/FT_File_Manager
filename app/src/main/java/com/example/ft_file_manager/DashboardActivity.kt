@@ -154,8 +154,16 @@ class DashboardActivity : AppCompatActivity() {
                                 startActivity(intent)
                             }
                             realPath.startsWith("smb://") -> {
+                                // 1. Διαβάζουμε τα αποθηκευμένα στοιχεία για αυτό το path
+                                val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
+                                // Χρησιμοποιούμε το realPath ως κλειδί για να βρούμε το σωστό User/Pass
+                                val savedUser = netPrefs.getString("user_$realPath", "")
+                                val savedPass = netPrefs.getString("pass_$realPath", "")
+
                                 val intent = Intent(this, NetworkClientActivity::class.java).apply {
                                     putExtra("TARGET_SMB_PATH", realPath)
+                                    putExtra("SMB_USER", savedUser)
+                                    putExtra("SMB_PASS", savedPass)
                                 }
                                 startActivity(intent)
                             }

@@ -173,61 +173,6 @@ class NetworkClientActivity : AppCompatActivity() {
         nsdManager.discoverServices("_smb._tcp", NsdManager.PROTOCOL_DNS_SD, discoveryListener)
     }
 
-    private fun connectToSMB(host: String, user: String, pass: String, port: Int) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            val client = SMBClient()
-            try {
-                client.connect(host, port).use { connection ->
-                    val auth = AuthenticationContext(user, pass.toCharArray(), "")
-                    val session = connection.authenticate(auth)
-
-                    // Αντί για listShares (που συχνά θέλει RPC),
-                    // δοκιμάζουμε τα 3 πιο κοινά ονόματα στο CoreELEC/LibreELEC
-                    val commonShares = listOf("Storage", "Videos", "Music", "Update")
-                    var connectedShare: DiskShare? = null
-                    var foundName = ""
-
-                    for (name in commonShares) {
-                        try {
-                            val share = session.connectShare(name) as DiskShare
-                            connectedShare = share
-                            foundName = name
-                            break // Αν συνδεθεί σε ένα, σταματάμε
-                        } catch (e: Exception) {
-                            continue // Δοκίμασε το επόμενο
-                        }
-                    }
-
-                    if (connectedShare != null) {
-                        val files = connectedShare.list("")
-                        // Μέσα στην connectToSMB της NetworkClientActivity
-                        withContext(Dispatchers.Main) {
-                            val intent = Intent(this@NetworkClientActivity, NetworkFileActivity::class.java).apply {
-                                putExtra("HOST", host)
-                                putExtra("USER", user)
-                                putExtra("PASS", pass)
-                                putExtra("SHARE", foundName)
-                                putExtra("PORT", port)
-                            }
-                            startActivity(intent)
-                        }
-                    } else {
-                        // Αν αποτύχουν όλα, εμφάνισε το σφάλμα
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@NetworkClientActivity,
-                                "STATUS_BAD_NETWORK_NAME: Δεν βρέθηκε ο φάκελος Storage ή Videos",
-                                Toast.LENGTH_LONG).show()
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@NetworkClientActivity, "Σφάλμα: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-    }
-
     private fun connectToSFTP(host: String, user: String, pass: String, port: Int) { // Προσθήκη port εδώ
         lifecycleScope.launch(Dispatchers.IO) {
             val jsch = JSch()
@@ -258,25 +203,106 @@ class NetworkClientActivity : AppCompatActivity() {
         }
     }
 
+    private fun connectToSMB(host: String, user: String, pass: String, port: Int) {
+        val cleanHost = host.trim()
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val client = SMBClient()
+            try {
+                client.connect(cleanHost, port).use { connection ->
+                    val auth = AuthenticationContext(user, pass.toCharArray(), "")
+                    val session = connection.authenticate(auth)
+
+                    val commonShares = listOf("Storage", "Videos", "Music", "Update")
+                    var connectedShare: DiskShare? = null
+                    var foundName = ""
+
+                    for (name in commonShares) {
+                        try {
+                            val share = session.connectShare(name) as DiskShare
+                            connectedShare = share
+                            foundName = name
+                            break
+                        } catch (e: Exception) {
+                            continue
+                        }
+                    }
+
+                    if (connectedShare != null) {
+                        // --- ΕΔΩ ΕΙΝΑΙ Η ΠΡΟΣΘΗΚΗ ΓΙΑ ΤΗΝ ΑΠΟΘΗΚΕΥΣΗ ---
+                        val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
+                        netPrefs.edit().apply {
+                            putString("user_smb://$cleanHost", user)
+                            putString("pass_smb://$cleanHost", pass)
+                            apply()
+                        }
+                        // ----------------------------------------------
+
+                        withContext(Dispatchers.Main) {
+                            val intent = Intent(this@NetworkClientActivity, NetworkFileActivity::class.java).apply {
+                                putExtra("HOST", cleanHost)
+                                putExtra("USER", user)
+                                putExtra("PASS", pass)
+                                putExtra("SHARE", foundName)
+                                putExtra("PORT", port)
+                            }
+                            startActivity(intent)
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@NetworkClientActivity,
+                                "STATUS_BAD_NETWORK_NAME: Δεν βρέθηκε ο φάκελος Storage ή Videos",
+                                Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@NetworkClientActivity, "Σφάλμα: ${e.message}", Toast.LENGTH_LONG).show()
+                    val progressBar = findViewById<ProgressBar>(R.id.scanProgress)
+                    startNetworkScan(progressBar)
+                }
+            }
+        }
+    }
+
     private fun loadFavoriteIntoFields(fav: String) {
         try {
-            // fav = "SMB: Host*smb://user:pass@host"
-            val fullUri = fav.substringAfter("*") // smb://user:pass@host
-            val uriCore = fullUri.removePrefix("smb://") // user:pass@host
+            // fav μπορεί να είναι: "SMB: Host*smb://user:pass@192.168.1.5"
+            // ή: "SMB: 192.168.1.5*smb://192.168.1.5"
+            val fullUri = fav.substringAfter("*").trim()
 
-            val userPass = uriCore.substringBefore("@") // user:pass
-            val host = uriCore.substringAfter("@") // host
+            var host = ""
+            var user = ""
+            var pass = ""
 
-            val user = userPass.substringBefore(":")
-            val pass = userPass.substringAfter(":")
+            if (fullUri.contains("@")) {
+                // ΠΕΡΙΠΤΩΣΗ 1: Το format έχει κωδικούς (user:pass@host)
+                val uriCore = fullUri.removePrefix("smb://")
+                val userPass = uriCore.substringBefore("@")
+                host = uriCore.substringAfter("@")
+                user = userPass.substringBefore(":")
+                pass = userPass.substringAfter(":")
+            } else {
+                // ΠΕΡΙΠΤΩΣΗ 2: Το format είναι απλό (smb://host) - Ψάχνουμε στα Prefs
+                host = fullUri.removePrefix("smb://")
+                val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
+                user = netPrefs.getString("user_smb://$host", "") ?: ""
+                pass = netPrefs.getString("pass_smb://$host", "") ?: ""
+            }
 
+            // Τοποθέτηση στα πεδία
             findViewById<EditText>(R.id.etHost).setText(host)
             findViewById<EditText>(R.id.etUser).setText(user)
             findViewById<EditText>(R.id.etPass).setText(pass)
             findViewById<RadioButton>(R.id.rbSmb).isChecked = true
             findViewById<EditText>(R.id.etPort).setText("445")
 
-            Toast.makeText(this, "Στοιχεία σύνδεσης $host", Toast.LENGTH_SHORT).show()
+            // Αν έχουμε host ΚΑΙ user, δοκιμάζουμε αυτόματη σύνδεση
+            if (host.isNotEmpty() && user.isNotEmpty()) {
+                Toast.makeText(this, "Αυτόματη σύνδεση στο $host", Toast.LENGTH_SHORT).show()
+                connectToSMB(host, user, pass, 445)
+            }
         } catch (e: Exception) {
             Log.e("FAV_ERROR", "Error parsing favorite", e)
         }
