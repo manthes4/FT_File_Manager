@@ -6,6 +6,7 @@ import android.os.Environment
 import android.os.StatFs
 import android.view.View
 import android.widget.ImageButton
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -29,9 +30,12 @@ class DashboardActivity : AppCompatActivity() {
         setContentView(R.layout.activity_dashboard)
 
         // 1. Αρχικοποίηση των Views για το Drawer και την Toolbar
-        val toolbar = findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.dashboardToolbar)
-        val drawerLayout = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
-        val navigationView = findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
+        val toolbar =
+            findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.dashboardToolbar)
+        val drawerLayout =
+            findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
+        val navigationView =
+            findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
 
         // 2. Ρύθμιση Toolbar Navigation (Άνοιγμα Συρταριού)
         toolbar.setNavigationOnClickListener {
@@ -44,17 +48,21 @@ class DashboardActivity : AppCompatActivity() {
                 R.id.nav_internal -> {
                     // Είσαι ήδη στο Dashboard, απλά κλείσε το συρτάρι
                 }
+
                 R.id.nav_root -> {
                     val intent = Intent(this, MainActivity::class.java)
                     intent.putExtra("START_PATH", "/")
                     startActivity(intent)
                 }
+
                 R.id.nav_ftp -> {
                     startActivity(Intent(this, FtpActivity::class.java))
                 }
+
                 R.id.nav_network -> {
                     startActivity(Intent(this, NetworkClientActivity::class.java))
                 }
+
                 R.id.nav_external -> {
                     val sdPath = getExternalSDPath()
                     if (sdPath != null) {
@@ -152,9 +160,10 @@ class DashboardActivity : AppCompatActivity() {
 
                     // 3. Το μενού ανοίγει ΜΟΝΟ από τις τρεις τελείες
                     // Χρησιμοποιούμε cast σε ImageButton για να μην έχουμε σφάλμα
-                    actionView?.findViewById<android.widget.ImageButton>(R.id.btnMoreOptions)?.setOnClickListener { view ->
-                        showFavoritePopupMenu(view, entry, index)
-                    }
+                    actionView?.findViewById<android.widget.ImageButton>(R.id.btnMoreOptions)
+                        ?.setOnClickListener { view ->
+                            showFavoritePopupMenu(view, entry, index)
+                        }
 
                     // 4. Καθαρισμός LongClickListener από το actionView
                     actionView?.setOnLongClickListener(null)
@@ -169,6 +178,7 @@ class DashboardActivity : AppCompatActivity() {
                 val host = realPath.replace("ftp://", "")
                 startActivity(Intent(this, FtpActivity::class.java).putExtra("TARGET_HOST", host))
             }
+
             realPath.startsWith("smb://") -> {
                 val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
                 val savedUser = netPrefs.getString("user_$realPath", null)
@@ -184,6 +194,7 @@ class DashboardActivity : AppCompatActivity() {
                 }
                 startActivity(intent)
             }
+
             else -> openPath(realPath)
         }
     }
@@ -286,7 +297,14 @@ class DashboardActivity : AppCompatActivity() {
         storageItems.add(DashboardItem(4, "FTP Server", null, R.drawable.ic_ftp))
 
         // 6. SMB/SFTP Network (ID 7) - Σύνδεση σε άλλες συσκευές
-        storageItems.add(DashboardItem(7, "Network SMB/SFTP", "network_global", R.drawable.ic_ftp)) // Χρησιμοποίησε ένα εικονίδιο δικτύου αν έχεις
+        storageItems.add(
+            DashboardItem(
+                7,
+                "Network SMB/SFTP",
+                "network_global",
+                R.drawable.ic_ftp
+            )
+        ) // Χρησιμοποίησε ένα εικονίδιο δικτύου αν έχεις
 
         // --- 2. Pinned Φακέλων (ID 5) ---
         val prefsDash = getSharedPreferences("dashboard_pins", MODE_PRIVATE)
@@ -305,7 +323,14 @@ class DashboardActivity : AppCompatActivity() {
                     val path = parts[1]
                     // Προσθήκη αν είναι τοπικό αρχείο που υπάρχει ή αν είναι δικτυακό (smb/ftp)
                     if (path.startsWith("smb://") || path.startsWith("ftp://") || File(path).exists()) {
-                        storageItems.add(DashboardItem(5, parts[0], path, R.drawable.ic_folder_yellow))
+                        storageItems.add(
+                            DashboardItem(
+                                5,
+                                parts[0],
+                                path,
+                                R.drawable.ic_folder_yellow
+                            )
+                        )
                     }
                 }
             }
@@ -363,9 +388,11 @@ class DashboardActivity : AppCompatActivity() {
             4 -> { // FTP Server
                 startActivity(Intent(this, FtpActivity::class.java))
             }
+
             7 -> { // Network SMB/SFTP (Client)
                 startActivity(Intent(this, NetworkClientActivity::class.java))
             }
+
             else -> {
                 val path = item.path ?: ""
 
@@ -439,10 +466,8 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun setupDrawerDragAndDrop() {
-        // Αντί για binding.navigationView, χρησιμοποιούμε findViewById
-        val navigationView = findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
-
-        // Πιάνουμε τον εσωτερικό RecyclerView του Drawer
+        val navigationView =
+            findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
         val navRecycler = navigationView.getChildAt(0) as? RecyclerView ?: return
 
         val itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
@@ -453,47 +478,76 @@ class DashboardActivity : AppCompatActivity() {
                 viewHolder: RecyclerView.ViewHolder,
                 target: RecyclerView.ViewHolder
             ): Boolean {
-                val fromPos = viewHolder.adapterPosition
-                val toPos = target.adapterPosition
-                val offset = 7 // Το σταθερό offset που βρήκαμε
+                val fromPos = viewHolder.bindingAdapterPosition
+                val toPos = target.bindingAdapterPosition
+
+                if (fromPos == RecyclerView.NO_POSITION || toPos == RecyclerView.NO_POSITION)
+                    return false
+
+                val adapter = recyclerView.adapter ?: return false
+                if (fromPos >= adapter.itemCount || toPos >= adapter.itemCount)
+                    return false
+
+                val fromFavIndex = getFavoriteIndexSafe(fromPos)
+                val toFavIndex = getFavoriteIndexSafe(toPos)
+
+                if (fromFavIndex == -1 || toFavIndex == -1)
+                    return false
 
                 val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
-                val savedPaths = prefs.getString("paths_ordered", "") ?: ""
-                val favoriteList = savedPaths.split("|").filter { it.isNotEmpty() }.toMutableList()
+                val favoriteList =
+                    prefs.getString("paths_ordered", "")?.split("|")?.filter { it.isNotEmpty() }
+                        ?.toMutableList() ?: mutableListOf()
 
-                val fromIdx = fromPos - offset
-                val toIdx = toPos - offset
+                if (fromFavIndex !in favoriteList.indices || toFavIndex !in favoriteList.indices)
+                    return false
 
-                if (fromIdx in favoriteList.indices && toIdx in favoriteList.indices) {
-                    // 1. Swap στη λίστα
-                    java.util.Collections.swap(favoriteList, fromIdx, toIdx)
+                // Swap
+                Collections.swap(favoriteList, fromFavIndex, toFavIndex)
 
-                    // 2. ΑΜΕΣΗ ΑΠΟΘΗΚΕΥΣΗ (για να μην χαθεί η αλλαγή)
-                    val newString = favoriteList.joinToString("|")
-                    prefs.edit().putString("paths_ordered", newString).apply()
+                // Save
+                val newString = favoriteList.joinToString("|")
+                prefs.edit().putString("paths_ordered", newString).apply()
+                getSharedPreferences("dashboard_pins", MODE_PRIVATE).edit()
+                    .putString("paths", newString).apply()
 
-                    // Ενημέρωση και του Dashboard κλειδιού
-                    getSharedPreferences("dashboard_pins", MODE_PRIVATE)
-                        .edit().putString("paths", newString).apply()
-
-                    // 3. Ενημέρωση του UI για το εφέ κίνησης
-                    recyclerView.adapter?.notifyItemMoved(fromPos, toPos)
-                    return true
-                }
-                return false
+                adapter.notifyItemMoved(fromPos, toPos)
+                return true
             }
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {}
 
-            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+            override fun clearView(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder
+            ) {
                 super.clearView(recyclerView, viewHolder)
-
-                // Μόλις αφήσεις το δάχτυλο, ανανεώνουμε τα πάντα για σιγουριά
                 updateDrawerMenu()
                 setupItems()
             }
         })
 
         itemTouchHelper.attachToRecyclerView(navRecycler)
+    }
+
+    private fun getFavoriteIndexSafe(position: Int): Int {
+        val navigationView =
+            findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
+        val recycler = navigationView.getChildAt(0) as? RecyclerView ?: return -1
+        val viewHolder = recycler.findViewHolderForAdapterPosition(position) ?: return -1
+        val itemView = viewHolder.itemView
+
+        val titleView =
+            itemView.findViewById<TextView>(com.google.android.material.R.id.design_menu_item_text)
+                ?: return -1
+
+        val title = titleView.text?.toString() ?: return -1
+
+        val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
+        val favoriteList =
+            prefs.getString("paths_ordered", "")?.split("|")?.filter { it.isNotEmpty() } ?: listOf()
+
+        // Βρες το index που ταιριάζει με το displayName
+        return favoriteList.indexOfFirst { it.startsWith("$title*") }
     }
 }
