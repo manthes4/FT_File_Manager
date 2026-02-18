@@ -1,54 +1,160 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp">
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Σύνδεση σε απομακρυσμένο Server"
-        android:textStyle="bold"
-        android:textColor="?attr/colorPrimary"/>
+    android:background="#0F0E0E">
 
     <LinearLayout
-        android:id="@+id/loginLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        android:padding="16dp">
 
-        <EditText android:id="@+id/etHost" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Host (π.χ. 192.168.1.5)" />
-        <EditText android:id="@+id/etUser" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Username" />
-        <EditText android:id="@+id/etPass" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Password" android:inputType="textPassword" />
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardClient"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:cardBackgroundColor="#3E0F0F"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="4dp"
+            app:checkedIconTint="#FFFC3B">
 
-        <Button android:id="@+id/btnConnect" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Σύνδεση" />
+            <LinearLayout
+                android:id="@+id/loginLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:text="Σύνδεση σε απομακρυσμένο Server"
+                    android:textColor="#FFC107"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <EditText
+                    android:id="@+id/etHost"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:drawableStart="@android:drawable/ic_menu_share"
+                    android:drawablePadding="8dp"
+                    android:hint="Host (π.χ. 192.168.1.5)"
+                    android:inputType="textUri" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:baselineAligned="false"
+                    android:orientation="horizontal">
+
+                    <EditText
+                        android:id="@+id/etUser"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:hint="User"
+                        android:inputType="textPersonName" />
+
+                    <EditText
+                        android:id="@+id/etPass"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:hint="Pass"
+                        android:inputType="textPassword" />
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/btnConnect"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="ΣΥΝΔΕΣΗ"
+                    app:cornerRadius="8dp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardServer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardBackgroundColor="#3E0F0F"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="4dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:text="Ο δικός μου FTP Server"
+                    android:textColor="#4CAF50"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <EditText
+                        android:id="@+id/etServerUser"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:hint="Server User"
+                        android:text="admin" />
+
+                    <EditText
+                        android:id="@+id/etServerPass"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:hint="Server Pass"
+                        android:inputType="textPassword"
+                        android:text="1234" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvServerInfo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginVertical="12dp"
+                    android:background="#E8F5E9"
+                    android:padding="12dp"
+                    android:text="IP: --"
+                    android:textAlignment="center"
+                    android:textColor="#2E7D32"
+                    android:textStyle="bold"
+                    android:typeface="monospace" />
+
+                <Button
+                    android:id="@+id/btnStartServer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:backgroundTint="#4CAF50"
+                    android:text="ΕΝΑΡΞΗ SERVER"
+                    app:cornerRadius="8dp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/ftpRecyclerView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@android:color/white"
+            android:visibility="gone" />
+
     </LinearLayout>
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="2dp"
-        android:layout_marginVertical="16dp"
-        android:background="#CCCCCC" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Ο δικός μου FTP Server"
-        android:textStyle="bold"
-        android:textColor="?attr/colorPrimary"/>
-
-    <EditText android:id="@+id/etServerUser" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Ορισμός User" android:text="admin" />
-    <EditText android:id="@+id/etServerPass" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Ορισμός Pass" android:inputType="textPassword" android:text="1234" />
-
-    <TextView android:id="@+id/tvServerInfo" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="IP: --" android:padding="8dp" android:textAlignment="center"/>
-
-    <Button android:id="@+id/btnStartServer" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Έναρξη Server" android:backgroundTint="#4CAF50" />
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/ftpRecyclerView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:visibility="gone" />
-
-</LinearLayout>
+</ScrollView>

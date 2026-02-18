@@ -105,7 +105,9 @@ class FtpActivity : AppCompatActivity() {
 
                     runOnUiThread {
                         pd.dismiss()
-                        binding.loginLayout.visibility = View.GONE
+
+                        binding.cardClient.visibility = View.GONE
+                        binding.cardServer.visibility = View.GONE
                         binding.ftpRecyclerView.visibility = View.VISIBLE
                         loadFtpFiles("/")
 
