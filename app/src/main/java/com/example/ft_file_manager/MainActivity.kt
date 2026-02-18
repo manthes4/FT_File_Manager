@@ -97,6 +97,21 @@ class MainActivity : AppCompatActivity() {
                     confirmBulkDelete(selectedFiles); true
                 }
 
+                R.id.action_share -> {
+                    if (selectedFiles.isNotEmpty()) {
+                        // Αν θέλεις να μοιραστείς πολλά αρχεία
+                        if (selectedFiles.size == 1) {
+                            shareFile(selectedFiles[0])
+                        } else {
+                            // Για πολλά αρχεία, θα χρειαστείς ACTION_SEND_MULTIPLE
+                            shareMultipleFiles(selectedFiles)
+                        }
+                    } else {
+                        Toast.makeText(this, "Επιλέξτε αρχεία πρώτα", Toast.LENGTH_SHORT).show()
+                    }
+                    true
+                }
+
                 R.id.action_copy -> {
                     // 1. Προετοιμασία των αρχείων στον TransferManager
                     TransferManager.filesToMove = selectedFiles
@@ -708,6 +723,29 @@ class MainActivity : AppCompatActivity() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivity(Intent.createChooser(intent, "Share via"))
+    }
+
+    private fun shareMultipleFiles(files: List<FileModel>) {
+        try {
+            val uris = files.map {
+                FileProvider.getUriForFile(
+                    this,
+                    "${packageName}.provider",
+                    File(it.path)
+                )
+            }
+
+            val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "*/*"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+
+            startActivity(Intent.createChooser(intent, "Κοινοποίηση"))
+        } catch (e: Exception) {
+            Log.e("SHARE", "Error sharing multiple", e)
+            Toast.makeText(this, "Σφάλμα: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun showRenameDialog(fileModel: FileModel) {
