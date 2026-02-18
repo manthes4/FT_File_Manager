@@ -154,16 +154,25 @@ class DashboardActivity : AppCompatActivity() {
                                 startActivity(intent)
                             }
                             realPath.startsWith("smb://") -> {
-                                // 1. Διαβάζουμε τα αποθηκευμένα στοιχεία για αυτό το path
+                                // 1. Πρέπει οπωσδήποτε να ορίσεις το netPrefs αν δεν είναι ήδη ορισμένο στη συνάρτηση
                                 val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
-                                // Χρησιμοποιούμε το realPath ως κλειδί για να βρούμε το σωστό User/Pass
-                                val savedUser = netPrefs.getString("user_$realPath", "")
-                                val savedPass = netPrefs.getString("pass_$realPath", "")
+
+                                // 2. Διαβάζουμε με "διπλό" έλεγχο (με smb:// και χωρίς)
+                                val savedUser = netPrefs.getString("user_$realPath", null)
+                                    ?: netPrefs.getString("user_${realPath.removePrefix("smb://")}", "")
+
+                                val savedPass = netPrefs.getString("pass_$realPath", null)
+                                    ?: netPrefs.getString("pass_${realPath.removePrefix("smb://")}", "")
 
                                 val intent = Intent(this, NetworkClientActivity::class.java).apply {
+                                    // Στέλνουμε το Path και τα στοιχεία που βρήκαμε
                                     putExtra("TARGET_SMB_PATH", realPath)
                                     putExtra("SMB_USER", savedUser)
                                     putExtra("SMB_PASS", savedPass)
+
+                                    // ΠΡΟΣΟΧΗ: Αν η NetworkClientActivity περιμένει το extra "FAVORITE_SMB_DATA"
+                                    // για να τρέξει την loadFavoriteIntoFields, πρόσθεσε και αυτή τη γραμμή:
+                                    putExtra("FAVORITE_SMB_DATA", "SMB: Favorite*$realPath")
                                 }
                                 startActivity(intent)
                             }
@@ -334,23 +343,42 @@ class DashboardActivity : AppCompatActivity() {
 
     private fun onItemClick(item: DashboardItem) {
         when (item.id) {
-            4 -> { // FTP Server (Local Server)
+            4 -> { // FTP Server
                 startActivity(Intent(this, FtpActivity::class.java))
             }
             7 -> { // Network SMB/SFTP (Client)
                 startActivity(Intent(this, NetworkClientActivity::class.java))
             }
             else -> {
-                // Για Internal, SD, Downloads, Root και Pinned
                 val path = item.path ?: ""
 
                 if (path.startsWith("smb://")) {
-                    // Αν είναι καρφιτσωμένο SMB, άνοιξε τον Client
-                    val intent = Intent(this, NetworkClientActivity::class.java)
-                    intent.putExtra("TARGET_SMB_PATH", path)
+                    // --- ΔΙΟΡΘΩΣΗ ΕΔΩ ---
+                    // Διαβάζουμε τα στοιχεία από τη μνήμη πριν ανοίξουμε την Activity
+                    // Μέσα στην onItemClick, στο κομμάτι που ελέγχει το path.startsWith("smb://")
+                    // Μέσα στο DashboardActivity (onItemClick)
+                    val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
+
+// Δοκιμάζουμε όλους τους πιθανούς συνδυασμούς κλειδιών
+                    val savedUser = netPrefs.getString("user_$path", null)
+                        ?: netPrefs.getString("user_${path.removePrefix("smb://")}", null)
+                        ?: netPrefs.getString("user_smb://${path.removePrefix("smb://")}", "")
+
+                    val savedPass = netPrefs.getString("pass_$path", null)
+                        ?: netPrefs.getString("pass_${path.removePrefix("smb://")}", null)
+                        ?: netPrefs.getString("pass_smb://${path.removePrefix("smb://")}", "")
+
+                    val intent = Intent(this, NetworkClientActivity::class.java).apply {
+                        putExtra("TARGET_SMB_PATH", path)
+                        putExtra("SMB_USER", savedUser)
+                        putExtra("SMB_PASS", savedPass)
+
+                        // Προσθέτουμε και αυτό για να ενεργοποιηθεί η αυτόματη σύνδεση
+                        // αν η NetworkClientActivity το περιμένει σε αυτό το Extra
+                        putExtra("FAVORITE_SMB_DATA", "SMB: Favorite*$path")
+                    }
                     startActivity(intent)
                 } else {
-                    // Για όλα τα τοπικά αρχεία
                     val intent = Intent(this, MainActivity::class.java)
                     intent.putExtra("START_PATH", path)
                     startActivity(intent)

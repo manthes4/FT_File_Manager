@@ -81,7 +81,8 @@ class NetworkClientActivity : AppCompatActivity() {
 
             if (host.isNotEmpty()) {
                 // Αν το πεδίο port είναι άδειο, παίρνει 445 για SMB ή 22 για SFTP
-                val port = if (portString.isNotEmpty()) portString.toInt() else (if (isSmb) 445 else 22)
+                val port =
+                    if (portString.isNotEmpty()) portString.toInt() else (if (isSmb) 445 else 22)
 
                 if (isSmb) {
                     connectToSMB(host, user, pass, port) // Προστέθηκε το port
@@ -93,10 +94,42 @@ class NetworkClientActivity : AppCompatActivity() {
             }
         }
 
-        // ΕΛΕΓΧΟΣ ΓΙΑ FAVORITE
-        val favoriteData = intent.getStringExtra("FAVORITE_SMB_DATA")
-        if (!favoriteData.isNullOrEmpty()) {
-            loadFavoriteIntoFields(favoriteData)
+        // --- ΕΛΕΓΧΟΣ ΓΙΑ ΣΥΝΔΕΣΗ ΑΠΟ DASHBOARD Ή ΑΓΑΠΗΜΕΝΑ ---
+
+        // --- ΕΛΕΓΧΟΣ ΓΙΑ ΣΥΝΔΕΣΗ ΑΠΟ DASHBOARD Ή ΑΓΑΠΗΜΕΝΑ ---
+        // --- Στην onCreate της NetworkClientActivity ---
+        val targetPath = intent.getStringExtra("TARGET_SMB_PATH") ?: ""
+        var userExtra = intent.getStringExtra("SMB_USER") ?: ""
+        var passExtra = intent.getStringExtra("SMB_PASS") ?: ""
+
+        if (targetPath.isNotEmpty()) {
+            var host = targetPath.removePrefix("smb://")
+            if (host.contains("@")) host = host.substringAfter("@")
+
+            // ΔΙΚΛΕΙΔΑ ΑΣΦΑΛΕΙΑΣ: Αν τα extras ήρθαν κενά από το Dashboard, ψάξε τα εδώ
+            if (userExtra.isEmpty()) {
+                val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
+                userExtra = netPrefs.getString("user_smb://$host", "")
+                    ?: netPrefs.getString("user_$host", "") ?: ""
+                passExtra = netPrefs.getString("pass_smb://$host", "")
+                    ?: netPrefs.getString("pass_$host", "") ?: ""
+            }
+
+            findViewById<EditText>(R.id.etHost).setText(host)
+            findViewById<EditText>(R.id.etUser).setText(userExtra)
+            findViewById<EditText>(R.id.etPass).setText(passExtra)
+            findViewById<RadioButton>(R.id.rbSmb).isChecked = true
+
+            if (userExtra.isNotEmpty()) {
+                connectToSMB(host, userExtra, passExtra, 445)
+            }
+        }
+        // 2. Αν δεν υπάρχουν αυτά, έλεγξε το παλιό format (FAVORITE_SMB_DATA)
+        else {
+            val favoriteData = intent.getStringExtra("FAVORITE_SMB_DATA")
+            if (!favoriteData.isNullOrEmpty()) {
+                loadFavoriteIntoFields(favoriteData)
+            }
         }
     }
 
@@ -230,10 +263,15 @@ class NetworkClientActivity : AppCompatActivity() {
 
                     if (connectedShare != null) {
                         // --- ΕΔΩ ΕΙΝΑΙ Η ΠΡΟΣΘΗΚΗ ΓΙΑ ΤΗΝ ΑΠΟΘΗΚΕΥΣΗ ---
+                        // Μέσα στην connectToSMB, στην επιτυχία:
                         val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
                         netPrefs.edit().apply {
+                            // Σώζουμε χρησιμοποιώντας ολόκληρο το path "smb://192.168.1.5"
                             putString("user_smb://$cleanHost", user)
                             putString("pass_smb://$cleanHost", pass)
+                            // Σώζουμε ΚΑΙ ως σκέτο path για σιγουριά (αν το realPath δεν έχει smb://)
+                            putString("user_$cleanHost", user)
+                            putString("pass_$cleanHost", pass)
                             apply()
                         }
                         // ----------------------------------------------
@@ -268,8 +306,7 @@ class NetworkClientActivity : AppCompatActivity() {
 
     private fun loadFavoriteIntoFields(fav: String) {
         try {
-            // fav μπορεί να είναι: "SMB: Host*smb://user:pass@192.168.1.5"
-            // ή: "SMB: 192.168.1.5*smb://192.168.1.5"
+            // Καθαρίζουμε το string από το "SMB: Host*"
             val fullUri = fav.substringAfter("*").trim()
 
             var host = ""
@@ -277,34 +314,46 @@ class NetworkClientActivity : AppCompatActivity() {
             var pass = ""
 
             if (fullUri.contains("@")) {
-                // ΠΕΡΙΠΤΩΣΗ 1: Το format έχει κωδικούς (user:pass@host)
+                // ΠΕΡΙΠΤΩΣΗ Α: user:pass@host (Από MainActivity favorites)
                 val uriCore = fullUri.removePrefix("smb://")
                 val userPass = uriCore.substringBefore("@")
                 host = uriCore.substringAfter("@")
                 user = userPass.substringBefore(":")
                 pass = userPass.substringAfter(":")
             } else {
-                // ΠΕΡΙΠΤΩΣΗ 2: Το format είναι απλό (smb://host) - Ψάχνουμε στα Prefs
-                host = fullUri.removePrefix("smb://")
+                // ΠΕΡΙΠΤΩΣΗ Β: smb://host ή απλά host (Από Dashboard)
+                host = fullUri.removePrefix("smb://").trim()
+
+                // Δοκιμάζουμε να τραβήξουμε τα στοιχεία με 2 διαφορετικά κλειδιά για σιγουριά
                 val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
+
+                // Κλειδί 1: smb://192.168.1.5
                 user = netPrefs.getString("user_smb://$host", "") ?: ""
                 pass = netPrefs.getString("pass_smb://$host", "") ?: ""
+
+                // Αν είναι ακόμα κενά, δοκιμάζουμε Κλειδί 2: 192.168.1.5 (χωρίς το smb://)
+                if (user.isEmpty()) {
+                    user = netPrefs.getString("user_$host", "") ?: ""
+                    pass = netPrefs.getString("pass_$host", "") ?: ""
+                }
             }
 
-            // Τοποθέτηση στα πεδία
+            // Ενημέρωση UI
             findViewById<EditText>(R.id.etHost).setText(host)
             findViewById<EditText>(R.id.etUser).setText(user)
             findViewById<EditText>(R.id.etPass).setText(pass)
             findViewById<RadioButton>(R.id.rbSmb).isChecked = true
             findViewById<EditText>(R.id.etPort).setText("445")
 
-            // Αν έχουμε host ΚΑΙ user, δοκιμάζουμε αυτόματη σύνδεση
+            // ΑΥΤΟΜΑΤΗ ΣΥΝΔΕΣΗ: Μόνο αν βρέθηκε χρήστης
             if (host.isNotEmpty() && user.isNotEmpty()) {
-                Toast.makeText(this, "Αυτόματη σύνδεση στο $host", Toast.LENGTH_SHORT).show()
                 connectToSMB(host, user, pass, 445)
+            } else {
+                // Αν δεν βρέθηκε χρήστης, ίσως η IP άλλαξε ή δεν σώθηκε ποτέ
+                Toast.makeText(this, "Δεν βρέθηκαν αποθηκευμένα στοιχεία. Παρακαλώ συνδεθείτε χειροκίνητα.", Toast.LENGTH_LONG).show()
             }
         } catch (e: Exception) {
-            Log.e("FAV_ERROR", "Error parsing favorite", e)
+            Log.e("FAV_ERROR", "Error", e)
         }
     }
 
