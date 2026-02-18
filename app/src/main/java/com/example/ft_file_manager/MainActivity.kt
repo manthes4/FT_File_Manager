@@ -9,6 +9,7 @@ import android.util.Log
 import android.view.MenuItem
 import android.view.View
 import android.widget.ImageButton
+import android.view.Menu
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -1160,6 +1161,18 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun getFavoriteIndexFromMenuPosition(position: Int): Int {
+        val menu = binding.navigationView.menu
+        var favIndex = 0
+
+        for (i in 0..position) {
+            if (menu.getItem(i).groupId == 100) {
+                favIndex++
+            }
+        }
+        return favIndex - 1
+    }
+
     private fun saveFavorites() {
         android.util.Log.d("DRAG_DEBUG", "--- SAVING FAVORITES ---")
         // 1. Αποθήκευση για το Drawer
@@ -1210,52 +1223,97 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupDrawerDragAndDrop() {
-        val navRecycler = binding.navigationView.getChildAt(0) as? RecyclerView ?: return
 
-        val itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
-            ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0
-        ) {
-            override fun onMove(
-                recyclerView: RecyclerView,
-                viewHolder: RecyclerView.ViewHolder,
-                target: RecyclerView.ViewHolder
-            ): Boolean {
-                val fromPos = viewHolder.adapterPosition
-                val toPos = target.adapterPosition
+        binding.navigationView.post {
 
-                val offset = 7 // Το offset που έχεις ορίσει
-                if (toPos < offset) return false
+            val navRecycler = binding.navigationView.getChildAt(0) as? RecyclerView ?: return@post
 
-                val fromIdx = fromPos - offset
-                val toIdx = toPos - offset
+            val callback = object : ItemTouchHelper.SimpleCallback(
+                ItemTouchHelper.UP or ItemTouchHelper.DOWN,
+                0
+            ) {
 
-                if (fromIdx in favoritePaths.indices && toIdx in favoritePaths.indices) {
-                    java.util.Collections.swap(favoritePaths, fromIdx, toIdx)
-                    recyclerView.adapter?.notifyItemMoved(fromPos, toPos)
+                override fun onMove(
+                    recyclerView: RecyclerView,
+                    viewHolder: RecyclerView.ViewHolder,
+                    target: RecyclerView.ViewHolder
+                ): Boolean {
+
+                    val fromPos = viewHolder.bindingAdapterPosition
+                    val toPos = target.bindingAdapterPosition
+
+                    if (fromPos == RecyclerView.NO_POSITION || toPos == RecyclerView.NO_POSITION)
+                        return false
+
+                    val adapter = recyclerView.adapter ?: return false
+
+                    if (fromPos >= adapter.itemCount || toPos >= adapter.itemCount)
+                        return false
+
+                    val fromFavIndex = getFavoriteIndexSafe(fromPos)
+                    val toFavIndex = getFavoriteIndexSafe(toPos)
+
+                    if (fromFavIndex == -1 || toFavIndex == -1)
+                        return false
+
+                    if (fromFavIndex !in favoritePaths.indices || toFavIndex !in favoritePaths.indices)
+                        return false
+
+                    Collections.swap(favoritePaths, fromFavIndex, toFavIndex)
+
+                    adapter.notifyItemMoved(fromPos, toPos)
+
                     return true
                 }
-                return false
-            }
 
-            // ΑΥΤΗ Η ΣΥΝΑΡΤΗΣΗ ΕΛΕΙΠΕ Ή ΗΤΑΝ ΕΚΤΟΣ ΑΓΚΥΛΩΝ:
-            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
-                // Την αφήνουμε άδεια αφού δεν θέλουμε swipe delete στο μενού
-            }
+                override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {}
 
-            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
-                super.clearView(recyclerView, viewHolder)
-                saveFavorites()
+                override fun isLongPressDragEnabled(): Boolean = true
 
-                // Χρησιμοποιούμε postDelayed για να προλάβει να τελειώσει το animation
-                // πριν ξαναφτιάξουμε το μενού από το μηδέν
-                recyclerView.postDelayed({
+                override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                    super.clearView(recyclerView, viewHolder)
+
+                    android.util.Log.d("DRAG_DEBUG", "New order: $favoritePaths")
+
+                    saveFavorites()
                     updateDrawerMenu()
-                }, 100)
+                }
             }
-        })
 
-        itemTouchHelper.attachToRecyclerView(navRecycler)
+            ItemTouchHelper(callback).attachToRecyclerView(navRecycler)
+        }
     }
+
+    private fun getFavoriteIndexSafe(position: Int): Int {
+
+        val recycler = binding.navigationView.getChildAt(0) as? RecyclerView ?: return -1
+        val viewHolder = recycler.findViewHolderForAdapterPosition(position) ?: return -1
+
+        val itemView = viewHolder.itemView
+
+        val titleView = itemView.findViewById<TextView>(com.google.android.material.R.id.design_menu_item_text)
+            ?: return -1
+
+        val title = titleView.text?.toString() ?: return -1
+
+        val index = favoritePaths.indexOfFirst { it.startsWith("$title*") }
+
+        return index
+    }
+
+
+    private fun getFavoritesStartIndex(): Int {
+        val menu = binding.navigationView.menu
+
+        for (i in 0 until menu.size()) {
+            val item = menu.getItem(i)
+            if (item.groupId == 100) {
+                return i
+            }
+        }
+        return menu.size()
+    }
+
 
     private fun loadFavoritesFromPrefs() {
         val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
