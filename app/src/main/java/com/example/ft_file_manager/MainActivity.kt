@@ -1006,80 +1006,79 @@ class MainActivity : AppCompatActivity() {
         menu.removeItem(R.id.nav_favorites_group)
         menu.removeGroup(R.id.nav_favorites_group)
 
+        navView.invalidate()
+
         // 3. Δημιουργία από το μηδέν
         val favoriteSubMenu = menu.addSubMenu(0, R.id.nav_favorites_group, 100, "ΑΓΑΠΗΜΕΝΑ")
 
         favoritePaths.forEachIndexed { index, entry ->
-            // Χωρίζουμε το Alias από το Path (μορφή: "Όνομα*smb://user:pass@host")
             val parts = entry.split("*")
             val (displayName, realPath) = if (parts.size > 1) {
                 parts[0] to parts[1]
             } else {
                 val name = when {
                     entry.startsWith("ftp://") -> entry.replace("ftp://", "")
-                    entry.startsWith("smb://") -> entry.substringAfter("@") // Δείχνει μόνο το host
+                    entry.startsWith("smb://") -> entry.substringAfter("@")
                     else -> File(entry).name
                 }
                 name to entry
             }
 
-            val menuItem = favoriteSubMenu.add(0, index, index, displayName)
+            // ΕΔΩ Η ΔΙΟΡΘΩΣΗ: Μία γραμμή που περιλαμβάνει τα πάντα
+            val menuItem = favoriteSubMenu.add(
+                R.id.nav_favorites_group, // Group ID
+                android.view.Menu.NONE,    // Item ID (σταθερό NONE)
+                index,                    // ORDER (εδώ βασιζόμαστε για τη σειρά)
+                displayName               // Το κείμενο
+            )
+
             menuItem.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
 
-            // --- Εικονίδιο ανάλογα με το πρωτόκολλο ---
+            // --- Εικονίδιο ---
             when {
                 realPath.startsWith("ftp://") -> menuItem.setIcon(android.R.drawable.ic_menu_share)
-                realPath.startsWith("smb://") -> menuItem.setIcon(android.R.drawable.ic_menu_set_as) // Ή ic_network αν έχεις
+                realPath.startsWith("smb://") -> menuItem.setIcon(android.R.drawable.ic_menu_set_as)
                 else -> menuItem.setIcon(android.R.drawable.ic_dialog_map)
             }
 
+            // --- Action View (για το κουμπί ...) ---
             menuItem.setActionView(R.layout.menu_item_favorite)
             val actionView = menuItem.actionView
 
-            // 1. Απλό κλικ
-            actionView?.setOnClickListener {
-                handleFavoriteClickInMain(realPath)
-                binding.drawerLayout.closeDrawers()
-            }
-
-            // 2. Long Click (Popup Menu)
-            actionView?.setOnLongClickListener {
-                val anchor = it.findViewById<View>(R.id.popupAnchor) ?: it
-                showFavoritePopupMenu(anchor, entry, index)
-                true
-            }
-
-            // 3. MenuItem Click (για σιγουριά)
-            menuItem.setOnMenuItemClickListener {
-                handleFavoriteClickInMain(realPath)
-                binding.drawerLayout.closeDrawers()
-                true
-            }
-
+            // 1. ΑΠΛΟ ΚΛΙΚ (Στο όνομα)
+            // Χρησιμοποιούμε τη δική σου λογική (FTP, SMB, Local)
             menuItem.setOnMenuItemClickListener {
                 when {
-                    // ΛΟΓΙΚΗ FTP
                     realPath.startsWith("ftp://") -> {
                         val host = realPath.replace("ftp://", "")
                         val intent = Intent(this, FtpActivity::class.java)
                         intent.putExtra("TARGET_HOST", host)
                         startActivity(intent)
                     }
-                    // ΛΟΓΙΚΗ SMB (ΝΕΟ)
                     realPath.startsWith("smb://") -> {
                         val intent = Intent(this, NetworkClientActivity::class.java)
-                        // Στέλνουμε όλο το string "SMB: Host*smb://user:pass@host"
                         intent.putExtra("FAVORITE_SMB_DATA", entry)
                         startActivity(intent)
                     }
-                    // ΤΟΠΙΚΟΙ ΦΑΚΕΛΟΙ
                     else -> {
-                        loadFiles(File(realPath))
+                        val folder = File(realPath)
+                        if (folder.exists()) loadFiles(folder)
                     }
                 }
                 binding.drawerLayout.closeDrawers()
                 true
             }
+
+            // 2. ΚΛΙΚ ΣΤΙΣ ΤΡΕΙΣ ΤΕΛΕΙΕΣ (ImageButton)
+            // Χρησιμοποιούμε το ImageButton από το νέο XML
+            actionView?.findViewById<android.widget.ImageButton>(R.id.btnMoreOptions)?.setOnClickListener { view ->
+                showFavoritePopupMenu(view, entry, index)
+            }
+
+            // 3. Καθαρισμός για το Drag & Drop
+            // Αφαιρούμε τυχόν παλιά Clicks από το actionView για να μην "κλέβουν" το Long Click
+            actionView?.setOnClickListener(null)
+            actionView?.setOnLongClickListener(null)
         }
     }
 
@@ -1122,11 +1121,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showFavoritePopupMenu(view: View, entry: String, index: Int) {
+    private fun showFavoritePopupMenu(view: android.view.View, entry: String, index: Int) {
         val popup = androidx.appcompat.widget.PopupMenu(this, view)
         popup.menu.add("Μετονομασία")
         popup.menu.add("Διαγραφή")
-
         popup.setOnMenuItemClickListener { item ->
             when (item.title) {
                 "Μετονομασία" -> showRenameFavoriteDialog(entry, index)
@@ -1163,14 +1161,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun saveFavorites() {
+        android.util.Log.d("DRAG_DEBUG", "--- SAVING FAVORITES ---")
         // 1. Αποθήκευση για το Drawer
         val prefsFav = getSharedPreferences("favorites", MODE_PRIVATE)
         val orderedString = favoritePaths.joinToString("|")
+        android.util.Log.d("DRAG_DEBUG", "Saving orderedString: $orderedString")
         prefsFav.edit().putString("paths_ordered", orderedString).apply()
 
         // 2. Ενημέρωση Dashboard
         val prefsDash = getSharedPreferences("dashboard_pins", MODE_PRIVATE)
         val currentDashString = prefsDash.getString("paths", "") ?: ""
+        android.util.Log.d("DRAG_DEBUG", "Current Dashboard state before sync: $currentDashString")
         val currentDashList = currentDashString.split("|").filter { it.isNotEmpty() }.toMutableList()
 
         // ΑΦΑΙΡΕΣΗ: Αν κάτι δεν υπάρχει πια στα favoritePaths, το βγάζουμε και από το Dashboard
@@ -1179,6 +1180,7 @@ class MainActivity : AppCompatActivity() {
             val dashEntry = iterator.next()
             if (!favoritePaths.contains(dashEntry)) {
                 iterator.remove()
+                android.util.Log.d("DRAG_DEBUG", "--- SAVE COMPLETED ---")
             }
         }
 
@@ -1221,41 +1223,34 @@ class MainActivity : AppCompatActivity() {
                 val fromPos = viewHolder.adapterPosition
                 val toPos = target.adapterPosition
 
-                // ΒΑΣΙΚΗ ΑΛΛΑΓΗ: Το offset σου είναι 7 βάσει των logs
-                val offset = 7
-
-                if (fromPos < offset || toPos < offset) return false
+                val offset = 7 // Το offset που έχεις ορίσει
+                if (toPos < offset) return false
 
                 val fromIdx = fromPos - offset
                 val toIdx = toPos - offset
 
-                // Έλεγχος αν οι δείκτες είναι μέσα στα όρια της λίστας (0 έως 2)
                 if (fromIdx in favoritePaths.indices && toIdx in favoritePaths.indices) {
-                    // 1. Swap στη λίστα
                     java.util.Collections.swap(favoritePaths, fromIdx, toIdx)
-
-                    // 2. Ενημέρωση του Adapter
                     recyclerView.adapter?.notifyItemMoved(fromPos, toPos)
-
-                    // 3. ΕΞΑΝΑΓΚΑΣΜΟΣ ανανέωσης για να παραμερίσουν οι άλλοι
-                    recyclerView.adapter?.notifyItemChanged(fromPos)
-                    recyclerView.adapter?.notifyItemChanged(toPos)
-
                     return true
                 }
                 return false
             }
 
-            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {}
+            // ΑΥΤΗ Η ΣΥΝΑΡΤΗΣΗ ΕΛΕΙΠΕ Ή ΗΤΑΝ ΕΚΤΟΣ ΑΓΚΥΛΩΝ:
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                // Την αφήνουμε άδεια αφού δεν θέλουμε swipe delete στο μενού
+            }
 
-            override fun clearView(
-                recyclerView: RecyclerView,
-                viewHolder: RecyclerView.ViewHolder
-            ) {
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
                 super.clearView(recyclerView, viewHolder)
-                // Σώζουμε και φρεσκάρουμε τα κουμπιά "X"
                 saveFavorites()
-                updateDrawerMenu()
+
+                // Χρησιμοποιούμε postDelayed για να προλάβει να τελειώσει το animation
+                // πριν ξαναφτιάξουμε το μενού από το μηδέν
+                recyclerView.postDelayed({
+                    updateDrawerMenu()
+                }, 100)
             }
         })
 

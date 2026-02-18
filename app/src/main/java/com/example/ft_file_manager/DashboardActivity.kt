@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.StatFs
 import android.view.View
+import android.widget.ImageButton
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -93,7 +94,8 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun updateDrawerMenu() {
-        val navView = findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
+        val navView =
+            findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
         val menu = navView.menu
 
         // 1. ΚΑΘΑΡΙΣΜΟΣ HEADER (Εικόνα)
@@ -123,81 +125,37 @@ class DashboardActivity : AppCompatActivity() {
                     val displayName = parts[0]
                     val realPath = parts[1]
 
-                    val menuItem = menu.add(R.id.group_favorites, index, index, displayName)
+                    val menuItem =
+                        favoriteSubMenu.add(R.id.group_favorites, index, index, displayName)
 
-// Ορισμός εικονιδίου
+                    // Εικονίδιο
                     when {
                         realPath.startsWith("ftp://") -> menuItem.setIcon(android.R.drawable.ic_menu_share)
                         realPath.startsWith("smb://") -> menuItem.setIcon(R.drawable.ic_root)
                         else -> menuItem.setIcon(R.drawable.ic_folder_yellow)
                     }
 
-// Σύνδεση με το αόρατο πλέον layout για το Long Click
+// 1. Ρύθμιση του Action View
                     menuItem.setActionView(R.layout.menu_item_favorite)
                     val actionView = menuItem.actionView
 
-// ... (μέσα στο loop των entries)
-
-                    val drawer = findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout)
-
-// 1. Απλό κλικ στο ActionView
-                    actionView?.setOnClickListener {
-                        handleFavoriteClick(realPath)
-                        drawer.closeDrawers() // Χρήση της τοπικής μεταβλητής drawer
-                    }
-
-// 2. Long Click για το Popup Menu
-                    actionView?.setOnLongClickListener {
-                        showFavoritePopupMenu(it, entry, index)
-                        true
-                    }
-
-                    // 3. Fallback κλικ στο ίδιο το MenuItem
+                    // 2. Απλό κλικ στο όνομα (ανοίγει το path & επιτρέπει Drag & Drop)
                     menuItem.setOnMenuItemClickListener {
                         handleFavoriteClick(realPath)
-                        drawer.closeDrawers()
-                        true
-                    }
-
-                    menuItem.setOnMenuItemClickListener {
-                        when {
-                            realPath.startsWith("ftp://") -> {
-                                val host = realPath.replace("ftp://", "")
-                                val intent = Intent(this, FtpActivity::class.java).apply {
-                                    putExtra("TARGET_HOST", host)
-                                }
-                                startActivity(intent)
-                            }
-                            realPath.startsWith("smb://") -> {
-                                // 1. Πρέπει οπωσδήποτε να ορίσεις το netPrefs αν δεν είναι ήδη ορισμένο στη συνάρτηση
-                                val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
-
-                                // 2. Διαβάζουμε με "διπλό" έλεγχο (με smb:// και χωρίς)
-                                val savedUser = netPrefs.getString("user_$realPath", null)
-                                    ?: netPrefs.getString("user_${realPath.removePrefix("smb://")}", "")
-
-                                val savedPass = netPrefs.getString("pass_$realPath", null)
-                                    ?: netPrefs.getString("pass_${realPath.removePrefix("smb://")}", "")
-
-                                val intent = Intent(this, NetworkClientActivity::class.java).apply {
-                                    // Στέλνουμε το Path και τα στοιχεία που βρήκαμε
-                                    putExtra("TARGET_SMB_PATH", realPath)
-                                    putExtra("SMB_USER", savedUser)
-                                    putExtra("SMB_PASS", savedPass)
-
-                                    // ΠΡΟΣΟΧΗ: Αν η NetworkClientActivity περιμένει το extra "FAVORITE_SMB_DATA"
-                                    // για να τρέξει την loadFavoriteIntoFields, πρόσθεσε και αυτή τη γραμμή:
-                                    putExtra("FAVORITE_SMB_DATA", "SMB: Favorite*$realPath")
-                                }
-                                startActivity(intent)
-                            }
-                            else -> openPath(realPath)
-                        }
                         findViewById<androidx.drawerlayout.widget.DrawerLayout>(R.id.drawerLayout).closeDrawers()
                         true
                     }
+
+                    // 3. Το μενού ανοίγει ΜΟΝΟ από τις τρεις τελείες
+                    // Χρησιμοποιούμε cast σε ImageButton για να μην έχουμε σφάλμα
+                    actionView?.findViewById<android.widget.ImageButton>(R.id.btnMoreOptions)?.setOnClickListener { view ->
+                        showFavoritePopupMenu(view, entry, index)
+                    }
+
+                    // 4. Καθαρισμός LongClickListener από το actionView
+                    actionView?.setOnLongClickListener(null)
                 }
-            }
+            } // Τέλος του forEach
         }
     }
 
@@ -205,10 +163,7 @@ class DashboardActivity : AppCompatActivity() {
         when {
             realPath.startsWith("ftp://") -> {
                 val host = realPath.replace("ftp://", "")
-                val intent = Intent(this, FtpActivity::class.java).apply {
-                    putExtra("TARGET_HOST", host)
-                }
-                startActivity(intent)
+                startActivity(Intent(this, FtpActivity::class.java).putExtra("TARGET_HOST", host))
             }
             realPath.startsWith("smb://") -> {
                 val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
@@ -221,6 +176,7 @@ class DashboardActivity : AppCompatActivity() {
                     putExtra("TARGET_SMB_PATH", realPath)
                     putExtra("SMB_USER", savedUser)
                     putExtra("SMB_PASS", savedPass)
+                    putExtra("FAVORITE_SMB_DATA", "SMB: Favorite*$realPath")
                 }
                 startActivity(intent)
             }

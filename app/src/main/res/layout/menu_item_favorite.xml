@@ -1,15 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="wrap_content"
     android:layout_height="match_parent"
-    android:gravity="center_vertical|end"
-    android:orientation="horizontal"
-    android:paddingEnd="8dp">
+    android:gravity="center">
 
-    <View
-        android:id="@+id/popupAnchor"
+    <ImageButton
+        android:id="@+id/btnMoreOptions"
         android:layout_width="40dp"
         android:layout_height="40dp"
-        android:background="?attr/selectableItemBackgroundBorderless" />
-
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@android:drawable/ic_menu_more"
+        android:contentDescription="Επιλογές"
+        app:tint="#888888" />
 </LinearLayout>
