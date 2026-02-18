@@ -439,8 +439,10 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun setupDrawerDragAndDrop() {
+        // Αντί για binding.navigationView, χρησιμοποιούμε findViewById
         val navigationView = findViewById<com.google.android.material.navigation.NavigationView>(R.id.navigationView)
-        // Ο RecyclerView είναι το πρώτο παιδί του NavigationView
+
+        // Πιάνουμε τον εσωτερικό RecyclerView του Drawer
         val navRecycler = navigationView.getChildAt(0) as? RecyclerView ?: return
 
         val itemTouchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
@@ -453,43 +455,42 @@ class DashboardActivity : AppCompatActivity() {
             ): Boolean {
                 val fromPos = viewHolder.adapterPosition
                 val toPos = target.adapterPosition
+                val offset = 7 // Το σταθερό offset που βρήκαμε
 
-                // Διάβασμα τρέχουσας λίστας από τα Prefs
                 val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
                 val savedPaths = prefs.getString("paths_ordered", "") ?: ""
                 val favoriteList = savedPaths.split("|").filter { it.isNotEmpty() }.toMutableList()
 
-                // Υπολογισμός offset: Η θέση του πρώτου αγαπημένου στον Adapter
-                // Συνήθως είναι μετά τα στατικά items (Internal, Root κλπ) + Header
-                val offset = toPos - (favoriteList.size - 1).coerceAtMost(toPos)
-                // Σημείωση: Αν το offset σου είναι σταθερά 7, αντικατάστησε το παραπάνω με: val offset = 7
-
                 val fromIdx = fromPos - offset
                 val toIdx = toPos - offset
 
-                // Έλεγχος αν είμαστε μέσα στα όρια των αγαπημένων
                 if (fromIdx in favoriteList.indices && toIdx in favoriteList.indices) {
-                    Collections.swap(favoriteList, fromIdx, toIdx)
+                    // 1. Swap στη λίστα
+                    java.util.Collections.swap(favoriteList, fromIdx, toIdx)
 
-                    // Αποθήκευση αμέσως στη μνήμη
-                    prefs.edit().putString("paths_ordered", favoriteList.joinToString("|")).apply()
+                    // 2. ΑΜΕΣΗ ΑΠΟΘΗΚΕΥΣΗ (για να μην χαθεί η αλλαγή)
+                    val newString = favoriteList.joinToString("|")
+                    prefs.edit().putString("paths_ordered", newString).apply()
 
-                    // Ενημέρωση του UI για το animation
+                    // Ενημέρωση και του Dashboard κλειδιού
+                    getSharedPreferences("dashboard_pins", MODE_PRIVATE)
+                        .edit().putString("paths", newString).apply()
+
+                    // 3. Ενημέρωση του UI για το εφέ κίνησης
                     recyclerView.adapter?.notifyItemMoved(fromPos, toPos)
                     return true
                 }
                 return false
             }
 
-            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
-                // Υποχρεωτική override αλλά κενή
-            }
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {}
 
             override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
                 super.clearView(recyclerView, viewHolder)
-                // Μόλις αφήσει το item, κάνουμε refresh τα πάντα για να συγχρονιστούν
+
+                // Μόλις αφήσεις το δάχτυλο, ανανεώνουμε τα πάντα για σιγουριά
                 updateDrawerMenu()
-                setupItems() // Ενημερώνει και τις κάρτες στο Dashboard αν είναι Pinned
+                setupItems()
             }
         })
 

@@ -9,7 +9,7 @@ import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 
 class DashboardAdapter(
-    private val items: List<DashboardItem>,
+    private val items: MutableList<DashboardItem>, // <--- Εδώ από List σε MutableList
     private val onClick: (DashboardItem) -> Unit,
     private val onLongClick: (DashboardItem) -> Unit // Προσθήκη Long Click
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
