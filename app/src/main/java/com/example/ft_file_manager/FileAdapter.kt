@@ -55,6 +55,8 @@ class FileAdapter(
 
         if (fileModel.isDirectory) {
             holder.icon.setImageResource(R.drawable.ic_folder_yellow)
+            // Κλήση του Helper για ασύγχρονο υπολογισμό
+            FolderCalculator.calculateFolderSize(fileModel, position, this)
         } else {
             // Λογική εικονιδίων για αρχεία
             if (!fileModel.path.startsWith("ftp://") &&

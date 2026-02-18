@@ -286,7 +286,7 @@ class MainActivity : AppCompatActivity() {
                         FileModel(
                             it.name, it.absolutePath, it.isDirectory,
                             cachedSize
-                                ?: if (it.isDirectory) "..." else formatFileSize(it.length()),
+                                ?: if (it.isDirectory) "..." else FolderCalculator.formatSize(it.length()),
                             false
                         )
                     )
@@ -327,31 +327,6 @@ class MainActivity : AppCompatActivity() {
             fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
             fullFileList = fileList
             updateAdapter(fileList)
-
-            // Background υπολογισμός μεγεθών φακέλων
-            launch(Dispatchers.Default) {
-                fileList.forEachIndexed { index, model ->
-                    if (model.isDirectory && sizeCache[model.path] == null) {
-                        val metadata =
-                            withContext(Dispatchers.IO) { getFolderMetadata(File(model.path)) }
-                        val infoText =
-                            if (metadata.fileCount == 0 && metadata.folderCount == 0 && metadata.size == 0L) {
-                                "Κενός φάκελος"
-                            } else {
-                                "${metadata.fileCount} αρ., ${metadata.folderCount} φακ. | ${
-                                    formatFileSize(
-                                        metadata.size
-                                    )
-                                }"
-                            }
-                        sizeCache[model.path] = infoText
-                        withContext(Dispatchers.Main) {
-                            model.size = infoText
-                            binding.recyclerView.adapter?.notifyItemChanged(index, infoText)
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -375,42 +350,6 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this@MainActivity, "Αποτυχία διαγραφής", Toast.LENGTH_SHORT).show()
             }
         }
-    }
-
-    // Πρόσθεσε και αυτές τις δύο βοηθητικές συναρτήσεις στην MainActivity
-    private fun getFolderMetadata(folder: File): FolderMetadata {
-        var totalSize: Long = 0
-        var totalFiles = 0
-        var totalFolders = 0
-
-        val files = folder.listFiles()
-        if (files != null) {
-            for (file in files) {
-                if (file.isFile) {
-                    totalSize += file.length()
-                    totalFiles++
-                } else if (file.isDirectory) {
-                    totalFolders++
-                    // ΑΝΑΔΡΟΜΗ: Καλεί τον εαυτό της για να μπει στον υποφάκελο
-                    val subMetadata = getFolderMetadata(file)
-                    totalSize += subMetadata.size
-                    totalFiles += subMetadata.fileCount
-                    totalFolders += subMetadata.folderCount
-                }
-            }
-        }
-        return FolderMetadata(totalSize, totalFiles, totalFolders)
-    }
-
-    private fun formatFileSize(size: Long): String {
-        if (size <= 0) return "0 B"
-        val units = arrayOf("B", "KB", "MB", "GB", "TB")
-        val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
-        return String.format(
-            "%.1f %s",
-            size / Math.pow(1024.0, digitGroups.toDouble()),
-            units[digitGroups]
-        )
     }
 
     private fun updateAdapter(list: List<FileModel>) {
