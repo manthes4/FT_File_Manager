@@ -94,12 +94,19 @@ class FileAdapter(
                 Glide.with(holder.icon.context)
                     .asBitmap()
                     .load(file)
-                    // Το μυστικό: ObjectKey βασισμένο στο path ΚΑΙ την ημερομηνία τροποποίησης
                     .signature(ObjectKey("${fileModel.path}_${file.lastModified()}"))
-                    .override(100, 100) // Λίγο μεγαλύτερο από πριν για ποιότητα, αλλά παραμένει γρήγορο
-                    .diskCacheStrategy(DiskCacheStrategy.ALL) // Αποθήκευση και του πρωτότυπου και του resized
+                    // 2. RGB_565: Λιγότερη RAM, ταχύτερο decoding
+                    .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
+                    .override(100, 100)
+                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                     .centerCrop()
                     .placeholder(R.drawable.ic_image_placeholder)
+                    .thumbnail(
+                        Glide.with(holder.icon.context)
+                            .asBitmap()
+                            .load(file)
+                            .sizeMultiplier(0.1f) // Φορτώνει ακαριαία μια πολύ θολή εκδοχή
+                    )
                     .into(holder.icon)
             } else {
                 // Στατικά εικονίδια για FTP ή μη-εικόνες
