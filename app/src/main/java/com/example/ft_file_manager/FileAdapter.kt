@@ -10,6 +10,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import java.io.File
 import android.webkit.MimeTypeMap
+import androidx.recyclerview.widget.DiffUtil
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.signature.ObjectKey
 
@@ -29,8 +30,10 @@ class FileAdapter(
 
     // Η συνάρτηση για την αναζήτηση πλέον θα δουλεύει κανονικά!
     fun updateList(newList: List<FileModel>) {
-        this.files = newList
-        notifyDataSetChanged()
+        val diffCallback = FileDiffCallback(files, newList)
+        val diffResult = DiffUtil.calculateDiff(diffCallback)
+        files = newList
+        diffResult.dispatchUpdatesTo(this)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FileViewHolder {
@@ -64,11 +67,24 @@ class FileAdapter(
         if (fileModel.isDirectory) {
             holder.icon.setImageResource(R.drawable.ic_folder_yellow)
 
-            holder.itemView.removeCallbacks(null) // ΠΟΛΥ ΣΗΜΑΝΤΙΚΟ: Ακύρωση του προηγούμενου
+            // 1. Ακύρωση οποιουδήποτε προηγούμενου Runnable είναι δεμένο με αυτό το View
+            holder.itemView.removeCallbacks(null)
 
-            holder.itemView.postDelayed({
-                FolderCalculator.calculateFolderSize(fileModel, position, this)
-            }, 200) // 200ms είναι ο ιδανικός χρόνος για να καταλάβει το σύστημα ότι σταμάτησες το σκρολάρισμα
+            // 2. Έλεγχος αν το μέγεθος είναι ήδη γνωστό (Cache)
+            if (fileModel.size == "--" || fileModel.size.isEmpty()) {
+                holder.info.text = "Υπολογισμός..."
+
+                // 3. Χρησιμοποιούμε ένα runnable για να δώσουμε χρόνο στο scroll να αναπνεύσει
+                val folderRunnable = Runnable {
+                    FolderCalculator.calculateFolderSize(fileModel, position, this)
+                }
+
+                // Αποθηκεύουμε το runnable στο tag του view για να μπορούμε να το ελέγξουμε
+                holder.itemView.tag = folderRunnable
+                holder.itemView.postDelayed(folderRunnable, 400) // Αυξημένο delay στα 400ms
+            } else {
+                holder.info.text = fileModel.size
+            }
 
         } else {
             // Λογική εικονιδίων για αρχεία
@@ -80,7 +96,7 @@ class FileAdapter(
                     .load(file)
                     // Το μυστικό: ObjectKey βασισμένο στο path ΚΑΙ την ημερομηνία τροποποίησης
                     .signature(ObjectKey("${fileModel.path}_${file.lastModified()}"))
-                    .override(150, 150) // Λίγο μεγαλύτερο από πριν για ποιότητα, αλλά παραμένει γρήγορο
+                    .override(100, 100) // Λίγο μεγαλύτερο από πριν για ποιότητα, αλλά παραμένει γρήγορο
                     .diskCacheStrategy(DiskCacheStrategy.ALL) // Αποθήκευση και του πρωτότυπου και του resized
                     .centerCrop()
                     .placeholder(R.drawable.ic_image_placeholder)
@@ -141,11 +157,27 @@ class FileAdapter(
 
     override fun onViewRecycled(holder: FileViewHolder) {
         super.onViewRecycled(holder)
-        // Ακυρώνει το delay αν το item βγήκε από την οθόνη πριν περάσουν τα 100ms
-        holder.itemView.removeCallbacks(null)
-        // Σταματάει το Glide για το συγκεκριμένο view
+        val runnable = holder.itemView.tag as? Runnable
+        if (runnable != null) {
+            holder.itemView.removeCallbacks(runnable)
+        }
+        holder.itemView.tag = null
         Glide.with(holder.itemView.context).clear(holder.icon)
     }
 
     override fun getItemCount() = files.size
+}
+
+class FileDiffCallback(
+    private val oldList: List<FileModel>,
+    private val newList: List<FileModel>
+) : DiffUtil.Callback() {
+    override fun getOldListSize() = oldList.size
+    override fun getNewListSize() = newList.size
+
+    override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int) =
+        oldList[oldItemPosition].path == newList[newItemPosition].path
+
+    override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int) =
+        oldList[oldItemPosition] == newList[newItemPosition]
 }

@@ -8,47 +8,53 @@ import android.text.SpannableStringBuilder
 import android.text.style.ForegroundColorSpan
 import java.io.File
 import java.text.DecimalFormat
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlin.math.log10
 import kotlin.math.pow
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Future
 
 object FolderCalculator {
 
-    private val executor = Executors.newFixedThreadPool(2)
+    private val executor = Executors.newFixedThreadPool(3)
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // 2. Map για να κρατάμε τις εκκρεμείς εργασίες ανά θέση (position)
+    private val runningTasks = ConcurrentHashMap<Int, Future<*>>()
 
     data class FolderResult(val size: Long, val fileCount: Int, val folderCount: Int)
 
-    fun calculateFolderSize(
-        fileModel: FileModel,
-        position: Int,
-        adapter: FileAdapter
-    ) {
+    fun calculateFolderSize(fileModel: FileModel, position: Int, adapter: FileAdapter) {
         val shouldCalculate = fileModel.size == "..." || fileModel.size == "--" || fileModel.size.isEmpty()
         if (!fileModel.isDirectory || !shouldCalculate) return
 
-        executor.execute {
+        // 3. Ακύρωση προηγούμενης εργασίας για την ίδια θέση (αν υπάρχει)
+        runningTasks[position]?.cancel(true)
+
+        val task = executor.submit {
             try {
+                // Έλεγχος αν η εργασία ακυρώθηκε πριν ξεκινήσει το βαρύ κομμάτι
+                if (Thread.currentThread().isInterrupted) return@submit
+
                 val root = File(fileModel.path)
                 val result = getFolderDataRecursive(root)
 
-                // 1. Δημιουργία του πολύχρωμου κειμένου
                 val spannable = buildColorfulInfo(result.fileCount, result.folderCount, result.size)
 
                 mainHandler.post {
-                    // ΔΙΟΡΘΩΣΗ: Αποθηκεύουμε το spannable (CharSequence) για να μείνουν τα χρώματα
                     fileModel.size = spannable
                     adapter.notifyItemChanged(position, spannable)
+                    runningTasks.remove(position) // Καθαρισμός όταν τελειώσει
                 }
             } catch (e: Exception) {
-                mainHandler.post {
-                    // Στο catch βάζουμε σταθερό κείμενο, γιατί η μεταβλητή spannable δεν υπάρχει εδώ
-                    val errorText = "Error"
-                    fileModel.size = errorText
-                    adapter.notifyItemChanged(position, errorText)
-                }
+                // Διαχείριση σφάλματος...
+                runningTasks.remove(position)
             }
         }
+
+        // Αποθήκευση της τρέχουσας εργασίας
+        runningTasks[position] = task
     }
 
     private fun buildColorfulInfo(files: Int, folders: Int, sizeBytes: Long): SpannableStringBuilder {
