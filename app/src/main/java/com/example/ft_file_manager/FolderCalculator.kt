@@ -13,41 +13,69 @@ import kotlin.math.log10
 import kotlin.math.pow
 import java.util.concurrent.Future
 
-object FolderCalculator {
-    // Η cache δέχεται CharSequence για να υποστηρίζει Spannable (χρώματα)
-    private val sizeCache = ConcurrentHashMap<String, CharSequence>()
+data class FolderResult(val size: Long, val fileCount: Int, val folderCount: Int)
 
+object FolderCalculator {
     private val executor = Executors.newFixedThreadPool(3)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val runningTasks = ConcurrentHashMap<Int, Future<*>>()
 
-    // Πρέπει να είναι public για να το βλέπει ο Task
-    data class FolderResult(val size: Long, val fileCount: Int, val folderCount: Int)
+    // --- ΑΥΤΗ ΕΙΝΑΙ Η ΣΥΝΑΡΤΗΣΗ ΠΟΥ ΕΛΕΙΠΕ ---
+    fun cancelTask(position: Int) {
+        runningTasks[position]?.cancel(true)
+        runningTasks.remove(position)
+    }
 
     fun calculateFolderSize(fileModel: FileModel, position: Int, adapter: FileAdapter) {
-        val root = File(fileModel.path)
-        val currentLastModified = root.lastModified()
+        val path = fileModel.path
+        // Αν είναι FTP, μην κάνεις τίποτα ακόμα (για να μη λαγκάρει το δίκτυο)
+        if (path.startsWith("ftp://")) return
 
-        // Εδώ ελέγχουμε αν αυτό που έχουμε ήδη στο UI είναι φρέσκο
-        // Αν το fileModel έχει ήδη μέγεθος ΚΑΙ δεν έχει αλλάξει ο φάκελος, σταμάτα.
-        if (fileModel.lastModified == currentLastModified && fileModel.size != "--") {
-            return
-        }
+        val root = File(path)
+        if (!root.exists() || !root.isDirectory) return
 
-        runningTasks[position]?.cancel(true)
+        // ΑΚΥΡΩΣΗ ΑΜΕΣΩΣ
+        cancelTask(position)
 
         val task = executor.submit {
             try {
-                val result = getFolderDataRecursive(root)
-                val spannable = buildColorfulInfo(result.fileCount, result.folderCount, result.size)
+                // 1. ΠΡΩΤΑ ΕΛΕΓΧΟΣ ΜΝΗΜΗΣ (πολύ γρήγορο)
+                val currentLM = root.lastModified()
 
-                mainHandler.post {
-                    fileModel.size = spannable.toString()
-                    fileModel.lastModified = currentLastModified // Αποθήκευση της ημερομηνίας
-                    adapter.notifyItemChanged(position, spannable)
+                // 2. ΕΛΕΓΧΟΣ ΒΑΣΗΣ
+                val db = AppDatabase.getDatabase(adapter.context)
+                val cached = db.folderDao().getFolder(path)
+
+                if (cached != null && cached.lastModified == currentLM) {
+                    val spannable = buildColorfulInfo(cached.fileCount, cached.folderCount, cached.size)
+                    // Ενημέρωση UI μόνο αν δεν έχει αλλάξει το position
+                    mainHandler.post {
+                        fileModel.size = spannable.toString()
+                        adapter.notifyItemChanged(position, spannable)
+                    }
+                    return@submit
                 }
-            } catch (e: Exception) { /* ... */ }
+
+                // 3. ΥΠΟΛΟΓΙΣΜΟΣ (Μόνο αν χρειάζεται)
+                // Προσθέτουμε μια μικρή παύση για να μη "γονατίζει" ο δίσκος στο σκρολάρισμα
+                Thread.sleep(50)
+
+                if (Thread.currentThread().isInterrupted) return@submit
+                val result = getFolderDataRecursive(root)
+
+                if (Thread.currentThread().isInterrupted) return@submit
+
+                // ΑΠΟΘΗΚΕΥΣΗ
+                db.folderDao().insertFolder(FolderCacheEntity(path, result.size, result.fileCount, result.folderCount, currentLM))
+
+                val spannable = buildColorfulInfo(result.fileCount, result.folderCount, result.size)
+                updateUI(fileModel, position, adapter, spannable)
+
+            } catch (e: Exception) {
+                runningTasks.remove(position)
+            }
         }
+        runningTasks[position] = task
     }
 
     // Αλλαγή σε public για να διορθωθεί το σφάλμα στη MainActivity
@@ -60,33 +88,40 @@ object FolderCalculator {
     }
 
     private fun getFolderDataRecursive(file: File): FolderResult {
-        // ΣΗΜΑΝΤΙΚΟ: Έλεγχος αν το Thread διακόπηκε (interrupted)
-        // Αν ο χρήστης έφυγε από τον φάκελο, σταμάτα αμέσως το σκανάρισμα!
-        if (Thread.currentThread().isInterrupted) return FolderResult(0, 0, 0)
+        // ΤΕΡΑΣΤΙΑ ΒΕΛΤΙΩΣΗ: Έλεγχος διακοπής σε κάθε επίπεδο
+        if (Thread.currentThread().isInterrupted) return FolderResult(0,0,0)
 
         var size: Long = 0
-        var fileCount = 0
-        var folderCount = 0
+        var filesC = 0
+        var foldersC = 0
 
-        val files = file.listFiles()
-        if (files != null) {
-            for (f in files) {
-                // Ξαναελέγχουμε μέσα στο loop για μέγιστη απόκριση
+        val list = file.listFiles()
+        if (list != null) {
+            for (f in list) {
                 if (Thread.currentThread().isInterrupted) break
-
                 if (f.isDirectory) {
-                    folderCount++
+                    foldersC++
                     val sub = getFolderDataRecursive(f)
                     size += sub.size
-                    fileCount += sub.fileCount
-                    folderCount += sub.folderCount
+                    filesC += sub.fileCount
+                    foldersC += sub.folderCount
                 } else {
-                    fileCount++
+                    filesC++
                     size += f.length()
                 }
             }
         }
-        return FolderResult(size, fileCount, folderCount)
+        return FolderResult(size, filesC, foldersC)
+    }
+
+    private fun updateUI(model: FileModel, pos: Int, adapter: FileAdapter, text: CharSequence) {
+        mainHandler.post {
+            // model.size = text.toString() <-- Αυτό χάνει τα χρώματα αν το UI ξανασχεδιαστεί
+            // Αν το FileModel.size είναι τύπου CharSequence, κράτα το ολόκληρο:
+            model.size = text.toString()
+            adapter.notifyItemChanged(pos, text) // Το text εδώ έχει τα χρώματα για το payload
+            runningTasks.remove(pos)
+        }
     }
 
     private fun buildColorfulInfo(files: Int, folders: Int, sizeBytes: Long): SpannableStringBuilder {

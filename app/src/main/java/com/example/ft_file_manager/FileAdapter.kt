@@ -20,6 +20,7 @@ class FileAdapter(
     private val onItemClick: (FileModel) -> Unit,
     private val onItemLongClick: (FileModel) -> Unit,
     private val onSelectionChanged: () -> Unit // Callback για να ενημερώνουμε την Toolbar
+
 ) : RecyclerView.Adapter<FileAdapter.FileViewHolder>() {
 
     class FileViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -36,6 +37,15 @@ class FileAdapter(
         diffResult.dispatchUpdatesTo(this)
     }
 
+    // 1. Πρόσθεσε αυτό για να έχουμε πρόσβαση στο context
+    val context get() = recyclerView?.context ?: throw IllegalStateException("Adapter not attached")
+    private var recyclerView: RecyclerView? = null
+
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        super.onAttachedToRecyclerView(recyclerView)
+        this.recyclerView = recyclerView
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FileViewHolder {
         val view = LayoutInflater.from(parent.context).inflate(R.layout.item_file, parent, false)
         return FileViewHolder(view)
@@ -43,12 +53,10 @@ class FileAdapter(
 
     override fun onBindViewHolder(holder: FileViewHolder, position: Int, payloads: MutableList<Any>) {
         if (payloads.isNotEmpty()) {
-            // Αλλάζουμε το "as String" σε "as CharSequence"
-            // ώστε να δέχεται και τα χρώματα από το FolderCalculator
-            val newInfo = payloads[0] as CharSequence
-            holder.info.text = newInfo
+            // ΕΝΗΜΕΡΩΣΗ ΜΟΝΟ ΤΟΥ TEXT, ΧΩΡΙΣ Glide/Icons κτλ.
+            holder.info.text = payloads[0] as CharSequence
         } else {
-            super.onBindViewHolder(holder, position, payloads)
+            onBindViewHolder(holder, position)
         }
     }
 
@@ -66,39 +74,34 @@ class FileAdapter(
         // Μέσα στην onBindViewHolder, εκεί που ελέγχεις αν είναι φάκελος:
         if (fileModel.isDirectory) {
             holder.icon.setImageResource(R.drawable.ic_folder_yellow)
-
-            // Ακύρωση τυχόν προηγούμενου αιτήματος για αυτό το view
             holder.itemView.removeCallbacks(null)
 
-            if (fileModel.size == "--" || fileModel.size == "...") {
-                holder.info.text = "..."
-
-                // Δημιουργούμε ένα Runnable με καθυστέρηση 400ms
-                val runnable = Runnable {
-                    FolderCalculator.calculateFolderSize(fileModel, holder.adapterPosition, this)
-                }
-                holder.itemView.postDelayed(runnable, 400)
-                holder.itemView.tag = runnable // Αποθήκευση για να το ακυρώσουμε αν χρειαστεί
-            } else {
+            // ΑΝ ΕΧΟΥΜΕ ΗΔΗ ΤΙΜΗ (που δεν είναι "..." ή "--"), ΜΗΝ ΚΑΛΕΙΣ ΤΟΝ CALCULATOR ΞΑΝΑ
+            // Αυτό θα σταματήσει το άσκοπο "πήγαινε-έλα" στη βάση δεδομένων
+            if (fileModel.size != "..." && fileModel.size != "--" && fileModel.size.isNotEmpty()) {
                 holder.info.text = fileModel.size
+            } else {
+                holder.info.text = "..."
+                FolderCalculator.calculateFolderSize(fileModel, holder.bindingAdapterPosition, this)
             }
 
         } else {
             // Λογική εικονιδίων για αρχεία
             // Μέσα στην onBindViewHolder του FileAdapter.kt
             if (!fileModel.path.startsWith("ftp://") &&
-                extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "mp4", "mkv", "mov")) {
-                    Glide.with(holder.icon.context)
-                        .asBitmap() // Πολύ πιο γρήγορο από το να φορτώνει ολόκληρο το drawable
-                        .load(fileModel.path)
-                        // Χρήση ΜΟΝΟ του cache key. ΠΟΤΕ file.lastModified() εδώ!
-                        .signature(ObjectKey(fileModel.path + fileModel.lastModifiedCached))
-                        .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565) // 50% λιγότερη RAM
-                        .override(100, 100) // Thumbnail size
-                        .diskCacheStrategy(DiskCacheStrategy.RESOURCE) // Αποθήκευση μόνο του μικρού αρχείου
-                        .thumbnail(0.1f) // Φόρτωσε ακαριαία μια θολή εικόνα
-                        .placeholder(R.drawable.ic_image_placeholder)
-                        .into(holder.icon)
+                extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "mp4", "mkv", "mov")
+            ) {
+                Glide.with(holder.icon.context)
+                    .asBitmap() // Πολύ πιο γρήγορο από το να φορτώνει ολόκληρο το drawable
+                    .load(fileModel.path)
+                    // Χρήση ΜΟΝΟ του cache key. ΠΟΤΕ file.lastModified() εδώ!
+                    .signature(ObjectKey(fileModel.path + fileModel.lastModifiedCached))
+                    .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565) // 50% λιγότερη RAM
+                    .override(100, 100) // Thumbnail size
+                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE) // Αποθήκευση μόνο του μικρού αρχείου
+                    .thumbnail(0.1f) // Φόρτωσε ακαριαία μια θολή εικόνα
+                    .placeholder(R.drawable.ic_image_placeholder)
+                    .into(holder.icon)
             } else {
                 // Στατικά εικονίδια για FTP ή μη-εικόνες
                 when (extension) {
@@ -151,17 +154,16 @@ class FileAdapter(
         holder.itemView.setOnClickListener {
             onItemClick(fileModel)
         }
-    } // Εδώ κλείνει η onBindViewHolder
+    }
 
     override fun onViewRecycled(holder: FileViewHolder) {
         super.onViewRecycled(holder)
-        // Ακύρωση του Glide request
         Glide.with(holder.itemView.context).clear(holder.icon)
-        // Ακύρωση του εκκρεμούς υπολογισμού μεγέθους
-        val runnable = holder.itemView.tag as? Runnable
-        if (runnable != null) {
-            holder.itemView.removeCallbacks(runnable)
-        }
+
+        // Πολύ σημαντικό: Ακύρωση του Task στη Room/Executor
+        FolderCalculator.cancelTask(holder.bindingAdapterPosition)
+
+        holder.itemView.removeCallbacks(null)
     }
 
     override fun getItemCount() = files.size
