@@ -46,37 +46,54 @@ class NetworkClientActivity : AppCompatActivity() {
         val progressBar = findViewById<ProgressBar>(R.id.scanProgress)
 
         val prefs = getSharedPreferences("network_prefs", Context.MODE_PRIVATE)
-        findViewById<EditText>(R.id.etHost).setText(prefs.getString("last_host", ""))
-        findViewById<EditText>(R.id.etUser).setText(prefs.getString("last_user", ""))
-        findViewById<EditText>(R.id.etPass).setText(prefs.getString("last_pass", ""))
-        findViewById<EditText>(R.id.etPort).setText(prefs.getString("last_port", "445"))
-
         val isLastSmb = prefs.getBoolean("is_smb", true)
+
+        // Συνάρτηση για να γεμίζει τα πεδία ανάλογα με το τι επιλέγει ο χρήστης
+        fun updateFields(isSmb: Boolean) {
+            val prefix = if (isSmb) "smb" else "sftp"
+            findViewById<EditText>(R.id.etHost).setText(prefs.getString("${prefix}_last_host", ""))
+            findViewById<EditText>(R.id.etUser).setText(prefs.getString("${prefix}_last_user", ""))
+            findViewById<EditText>(R.id.etPass).setText(prefs.getString("${prefix}_last_pass", ""))
+            findViewById<EditText>(R.id.etPort).setText(prefs.getString("${prefix}_last_port", if (isSmb) "445" else "22"))
+        }
+
+// Αρχική φόρτωση
         if (isLastSmb) {
             findViewById<RadioButton>(R.id.rbSmb).isChecked = true
         } else {
             findViewById<RadioButton>(R.id.rbSftp).isChecked = true
         }
-// ... και ούτω καθεξής
+        updateFields(isLastSmb)
 
         btnScan.setOnClickListener {
             startNetworkScan(progressBar)
         }
 
+        // 1. Πρώτα ορίζουμε τις μεταβλητές που χρειαζόμαστε
         val etPort = findViewById<EditText>(R.id.etPort)
         val btnConnect = findViewById<Button>(R.id.btnConnect)
 
+// 2. Ο ΕΝΙΑΙΟΣ Listener για το SMB
         findViewById<RadioButton>(R.id.rbSmb).setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
+                // UI Αλλαγές
                 btnConnect.text = "Σύνδεση (SMB)"
-                etPort.setText("445") // Αυτόματη αλλαγή σε SMB port
+                etPort.setText("445")
+
+                // Φόρτωση δεδομένων (Καλεί τη συνάρτηση που φτιάξαμε)
+                updateFields(true)
             }
         }
 
+// 3. Ο ΕΝΙΑΙΟΣ Listener για το SFTP
         findViewById<RadioButton>(R.id.rbSftp).setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
+                // UI Αλλαγές
                 btnConnect.text = "Σύνδεση (SFTP)"
-                etPort.setText("22") // Αυτόματη αλλαγή σε SFTP port
+                etPort.setText("22")
+
+                // Φόρτωση δεδομένων
+                updateFields(false)
             }
         }
 
@@ -219,10 +236,10 @@ class NetworkClientActivity : AppCompatActivity() {
         // 1. Αποθήκευση τελευταίας σύνδεσης (όπως το είχαμε)
         val prefs = getSharedPreferences("network_prefs", Context.MODE_PRIVATE)
         prefs.edit().apply {
-            putString("last_host", host.trim())
-            putString("last_user", user)
-            putString("last_pass", pass)
-            putString("last_port", port.toString())
+            putString("sftp_last_host", host)
+            putString("sftp_last_user", user)
+            putString("sftp_last_pass", pass)
+            putString("sftp_last_port", port.toString())
             putBoolean("is_smb", false)
             apply()
         }
@@ -270,11 +287,11 @@ class NetworkClientActivity : AppCompatActivity() {
         // --- ΑΠΟΘΗΚΕΥΣΗ ΤΕΛΕΥΤΑΙΑΣ ΣΥΝΔΕΣΗΣ ΓΙΑ ΤΟ UI ---
         val prefs = getSharedPreferences("network_prefs", Context.MODE_PRIVATE)
         prefs.edit().apply {
-            putString("last_host", cleanHost)
-            putString("last_user", user)
-            putString("last_pass", pass)
-            putString("last_port", port.toString())
-            putBoolean("is_smb", true) // Για να ξέρουμε να επιλέξουμε το RadioButton
+            putString("smb_last_host", host)
+            putString("smb_last_user", user)
+            putString("smb_last_pass", pass)
+            putString("smb_last_port", port.toString())
+            putBoolean("is_smb", true)
             apply()
         }
 
@@ -345,51 +362,73 @@ class NetworkClientActivity : AppCompatActivity() {
 
     private fun loadFavoriteIntoFields(fav: String) {
         try {
-            // Καθαρίζουμε το string από το "SMB: Host*"
+            // 1. Διάγνωση πρωτοκόλλου
+            val isSftpFavorite = fav.startsWith("SFTP:")
             val fullUri = fav.substringAfter("*").trim()
 
             var host = ""
             var user = ""
             var pass = ""
+            var port = if (isSftpFavorite) 22 else 445
 
             if (fullUri.contains("@")) {
                 // ΠΕΡΙΠΤΩΣΗ Α: user:pass@host (Από MainActivity favorites)
-                val uriCore = fullUri.removePrefix("smb://")
-                val userPass = uriCore.substringBefore("@")
-                host = uriCore.substringAfter("@")
+                val cleanUri = if (isSftpFavorite) {
+                    fullUri.removePrefix("sftp://")
+                } else {
+                    fullUri.removePrefix("smb://")
+                }
+
+                val userPass = cleanUri.substringBefore("@")
+                val hostPort = cleanUri.substringAfter("@")
+
                 user = userPass.substringBefore(":")
                 pass = userPass.substringAfter(":")
+
+                // Έλεγχος αν το host έχει και port (π.χ. 192.168.1.5:2222)
+                if (hostPort.contains(":")) {
+                    host = hostPort.substringBefore(":")
+                    port = hostPort.substringAfter(":").toInt()
+                } else {
+                    host = hostPort
+                }
             } else {
-                // ΠΕΡΙΠΤΩΣΗ Β: smb://host ή απλά host (Από Dashboard)
-                host = fullUri.removePrefix("smb://").trim()
+                // ΠΕΡΙΠΤΩΣΗ Β: Απλό host (Από Dashboard)
+                host = if (isSftpFavorite) fullUri.removePrefix("sftp://") else fullUri.removePrefix("smb://")
 
-                // Δοκιμάζουμε να τραβήξουμε τα στοιχεία με 2 διαφορετικά κλειδιά για σιγουριά
                 val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
+                val prefix = if (isSftpFavorite) "sftp" else "smb"
 
-                // Κλειδί 1: smb://192.168.1.5
-                user = netPrefs.getString("user_smb://$host", "") ?: ""
-                pass = netPrefs.getString("pass_smb://$host", "") ?: ""
+                user = netPrefs.getString("user_${prefix}://$host", "") ?: ""
+                pass = netPrefs.getString("pass_${prefix}://$host", "") ?: ""
 
-                // Αν είναι ακόμα κενά, δοκιμάζουμε Κλειδί 2: 192.168.1.5 (χωρίς το smb://)
                 if (user.isEmpty()) {
                     user = netPrefs.getString("user_$host", "") ?: ""
                     pass = netPrefs.getString("pass_$host", "") ?: ""
                 }
             }
 
-            // Ενημέρωση UI
+            // 2. Ενημέρωση UI - Αυτό θα ενεργοποιήσει αυτόματα τους Listeners που φτιάξαμε!
+            if (isSftpFavorite) {
+                findViewById<RadioButton>(R.id.rbSftp).isChecked = true
+            } else {
+                findViewById<RadioButton>(R.id.rbSmb).isChecked = true
+            }
+
             findViewById<EditText>(R.id.etHost).setText(host)
             findViewById<EditText>(R.id.etUser).setText(user)
             findViewById<EditText>(R.id.etPass).setText(pass)
-            findViewById<RadioButton>(R.id.rbSmb).isChecked = true
-            findViewById<EditText>(R.id.etPort).setText("445")
+            findViewById<EditText>(R.id.etPort).setText(port.toString())
 
-            // ΑΥΤΟΜΑΤΗ ΣΥΝΔΕΣΗ: Μόνο αν βρέθηκε χρήστης
+            // 3. ΑΥΤΟΜΑΤΗ ΣΥΝΔΕΣΗ
             if (host.isNotEmpty() && user.isNotEmpty()) {
-                connectToSMB(host, user, pass, 445)
+                if (isSftpFavorite) {
+                    connectToSFTP(host, user, pass, port)
+                } else {
+                    connectToSMB(host, user, pass, port)
+                }
             } else {
-                // Αν δεν βρέθηκε χρήστης, ίσως η IP άλλαξε ή δεν σώθηκε ποτέ
-                Toast.makeText(this, "Δεν βρέθηκαν αποθηκευμένα στοιχεία. Παρακαλώ συνδεθείτε χειροκίνητα.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Στοιχεία σύνδεσης μη διαθέσιμα", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
             Log.e("FAV_ERROR", "Error", e)

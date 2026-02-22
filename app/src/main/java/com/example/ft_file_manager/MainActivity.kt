@@ -33,7 +33,9 @@ import androidx.lifecycle.lifecycleScope
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.signature.ObjectKey
-import com.example.ft_file_manager.FileAdapter.FileViewHolder
+import com.jcraft.jsch.JSch
+import com.jcraft.jsch.Session
+import com.jcraft.jsch.ChannelSftp
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -44,6 +46,11 @@ class MainActivity : AppCompatActivity() {
     private var isSelectionMode = false // Αυτή η γραμμή έλειπε!
     private var bulkFilesToMove = listOf<FileModel>() // Νέα μεταβλητή στην κορυφή της κλάσης!
     private val sizeCache = mutableMapOf<String, CharSequence>()
+
+    private var protocol = "SMB"
+    private var host = ""
+    private var user = ""
+    private var pass = ""
 
     // Αντί για MutableSet, χρησιμοποιούμε MutableList για να έχουμε σειρά (index)
     private var favoritePaths = mutableListOf<String>()
@@ -164,10 +171,6 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
 
-                R.id.action_delete -> {
-                    confirmBulkDelete(selectedFiles); true
-                }
-
                 R.id.action_share -> {
                     if (selectedFiles.isNotEmpty()) {
                         // Αν θέλεις να μοιραστείς πολλά αρχεία
@@ -184,20 +187,18 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 R.id.action_copy -> {
-                    // 1. Προετοιμασία των αρχείων στον TransferManager
                     TransferManager.filesToMove = selectedFiles
                     TransferManager.isCut = false
-                    TransferManager.sourceIsSmb = false
+
+                    // ΕΔΩ Η ΑΛΛΑΓΗ: Αν το protocol είναι SMB, τότε sourceIsSmb = true
+                    TransferManager.sourceIsSmb = (protocol == "SMB")
+                    TransferManager.sourceIsSftp = (protocol == "SFTP") // Αν έχεις προσθέσει αυτό το flag
 
                     startBulkMove(selectedFiles, isCut = false)
 
-                    // 2. ΜΕΤΑΒΑΣΗ ΣΤΟ DASHBOARD
                     val intent = Intent(this, DashboardActivity::class.java)
-                    // Καθαρίζουμε το ιστορικό ώστε το Back να μην σε γυρνάει εδώ, αλλά να κλείνει το app ή να μένει στο Dashboard
                     intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                     startActivity(intent)
-
-                    // 3. Κλείνουμε την τρέχουσα Activity φακέλων
                     finish()
                     true
                 }
@@ -205,15 +206,16 @@ class MainActivity : AppCompatActivity() {
                 R.id.action_cut -> {
                     TransferManager.filesToMove = selectedFiles
                     TransferManager.isCut = true
-                    TransferManager.sourceIsSmb = false
+
+                    // ΕΔΩ Η ΑΛΛΑΓΗ: Παρομοίως, ενημερώνουμε την πηγή
+                    TransferManager.sourceIsSmb = (protocol == "SMB")
+                    TransferManager.sourceIsSftp = (protocol == "SFTP")
 
                     startBulkMove(selectedFiles, isCut = true)
 
-                    // ΜΕΤΑΒΑΣΗ ΣΤΟ DASHBOARD
                     val intent = Intent(this, DashboardActivity::class.java)
                     intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                     startActivity(intent)
-
                     finish()
                     true
                 }
@@ -221,6 +223,10 @@ class MainActivity : AppCompatActivity() {
                 R.id.action_rename -> {
                     if (selectedFiles.size == 1) showRenameDialog(selectedFiles[0])
                     true
+                }
+
+                R.id.action_delete -> {
+                    confirmBulkDelete(selectedFiles); true
                 }
 
                 else -> false
@@ -479,14 +485,28 @@ class MainActivity : AppCompatActivity() {
         val view = layoutInflater.inflate(R.layout.layout_file_options, null)
 
         view.findViewById<TextView>(R.id.btnCopy).setOnClickListener {
-            // Ενημέρωση τοπικών μεταβλητών (για συμβατότητα)
+            // 1. Ενημέρωση τοπικών μεταβλητών
             fileToMove = file
             isCutOperation = false
 
-            // Ενημέρωση TransferManager (για να το βρει η νέα Activity μετά το Dashboard)
+            // 2. Ενημέρωση TransferManager με βάση το πρωτόκολλο
             TransferManager.filesToMove = listOf(file)
             TransferManager.isCut = false
-            TransferManager.sourceIsSmb = false
+
+            // Εδώ είναι το κρίσιμο σημείο:
+            TransferManager.sourceIsSmb = (protocol == "SMB")
+            TransferManager.sourceIsSftp = (protocol == "SFTP")
+
+            // Αποθήκευση στοιχείων σύνδεσης στον TransferManager για να ξέρει από πού να τα τραβήξει
+            if (protocol == "SFTP") {
+                TransferManager.sftpHost = host
+                TransferManager.sftpUser = user
+                TransferManager.sftpPass = pass
+            } else {
+                TransferManager.smbHost = host
+                TransferManager.smbUser = user
+                TransferManager.smbPass = pass
+            }
 
             dialog.dismiss()
 
@@ -502,9 +522,24 @@ class MainActivity : AppCompatActivity() {
             fileToMove = file
             isCutOperation = true
 
+            // 1. Ενημέρωση TransferManager
             TransferManager.filesToMove = listOf(file)
             TransferManager.isCut = true
-            TransferManager.sourceIsSmb = false
+
+            // 2. Ενημέρωση Πρωτοκόλλου Πηγής
+            TransferManager.sourceIsSmb = (protocol == "SMB")
+            TransferManager.sourceIsSftp = (protocol == "SFTP")
+
+            // 3. Μεταφορά στοιχείων σύνδεσης
+            if (protocol == "SFTP") {
+                TransferManager.sftpHost = host
+                TransferManager.sftpUser = user
+                TransferManager.sftpPass = pass
+            } else {
+                TransferManager.smbHost = host
+                TransferManager.smbUser = user
+                TransferManager.smbPass = pass
+            }
 
             dialog.dismiss()
 
@@ -585,8 +620,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun pasteFile() {
-        // 1. ΕΛΕΓΧΟΣ: Μήπως έρχονται αρχεία από το CoreELEC;
-        if (TransferManager.filesToMove.isNotEmpty() && TransferManager.sourceIsSmb) {
+        // 1. ΕΛΕΓΧΟΣ: Μήπως έρχονται αρχεία από Δίκτυο (SMB ή SFTP);
+        if (TransferManager.filesToMove.isNotEmpty() && (TransferManager.sourceIsSmb || TransferManager.sourceIsSftp)) {
             executeLocalPaste()
             return
         }
@@ -657,44 +692,65 @@ class MainActivity : AppCompatActivity() {
             try {
                 withContext(Dispatchers.Main) { binding.progressBar.visibility = View.VISIBLE }
 
-                // ΔΙΟΡΘΩΣΗ: Χρήση του currentPath που ήδη έχεις στην Activity
                 val targetDir = currentPath
 
                 TransferManager.filesToMove.forEach { model ->
-                    // Δημιουργία SMB Context για το Download
-                    val props = java.util.Properties()
-                    props.setProperty("jcifs.smb.client.dfs.disabled", "true")
-                    val config = org.codelibs.jcifs.smb.config.PropertyConfiguration(props)
-                    val baseContext = org.codelibs.jcifs.smb.context.BaseContext(config)
-                    val auth = org.codelibs.jcifs.smb.impl.NtlmPasswordAuthenticator(
-                        null, TransferManager.smbUser, TransferManager.smbPass
-                    )
-                    val smbContext = baseContext.withCredentials(auth)
+                    val localDest = File(targetDir, model.name)
 
-                    val smbSource = org.codelibs.jcifs.smb.impl.SmbFile(model.path, smbContext)
-                    val localDest = File(targetDir, smbSource.name)
+                    if (TransferManager.sourceIsSftp) {
+                        // --- SFTP DOWNLOAD (ΝΕΟ) ---
+                        val jsch = com.jcraft.jsch.JSch()
+                        val session = jsch.getSession(TransferManager.sftpUser, TransferManager.sftpHost, 22)
+                        session.setPassword(TransferManager.sftpPass)
+                        session.setConfig("StrictHostKeyChecking", "no")
+                        session.connect()
 
-                    // Ροή δεδομένων (Download)
-                    smbSource.inputStream.use { input ->
-                        localDest.outputStream().use { output ->
-                            input.copyTo(output)
+                        val channel = session.openChannel("sftp") as com.jcraft.jsch.ChannelSftp
+                        channel.connect()
+
+                        channel.get(model.path, localDest.absolutePath)
+
+                        if (TransferManager.isCut) channel.rm(model.path)
+
+                        channel.disconnect()
+                        session.disconnect()
+
+                    } else if (TransferManager.sourceIsSmb) {
+                        // --- SMB DOWNLOAD (Ο ΔΙΚΟΣ ΣΟΥ ΚΩΔΙΚΑΣ ΠΟΥ ΔΟΥΛΕΥΕ) ---
+                        val props = java.util.Properties()
+                        props.setProperty("jcifs.smb.client.dfs.disabled", "true")
+                        val config = org.codelibs.jcifs.smb.config.PropertyConfiguration(props)
+                        val baseContext = org.codelibs.jcifs.smb.context.BaseContext(config)
+                        val auth = org.codelibs.jcifs.smb.impl.NtlmPasswordAuthenticator(
+                            null, TransferManager.smbUser, TransferManager.smbPass
+                        )
+                        val smbContext = baseContext.withCredentials(auth)
+
+                        // Επαναφορά στο path που δούλευε (org.codelibs.jcifs.smb.impl.SmbFile)
+                        val smbSource = org.codelibs.jcifs.smb.impl.SmbFile(model.path, smbContext)
+
+                        // Προσοχή: Χρήση getInputStream() αντί για .inputStream
+                        smbSource.getInputStream().use { input ->
+                            localDest.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
                         }
-                    }
 
-                    if (TransferManager.isCut) smbSource.delete()
+                        if (TransferManager.isCut) smbSource.delete()
+                    }
                 }
 
                 withContext(Dispatchers.Main) {
                     binding.progressBar.visibility = View.GONE
-                    loadFiles(currentPath) // Φρεσκάρισμα της λίστας στο κινητό
-                    TransferManager.filesToMove = emptyList() // Άδειασμα "clipboard"
+                    loadFiles(currentPath)
+                    TransferManager.filesToMove = emptyList()
                     binding.fabPaste.hide()
-                    Toast.makeText(this@MainActivity, "Λήψη από CoreELEC επιτυχής!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "Η λήψη ολοκληρώθηκε!", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     binding.progressBar.visibility = View.GONE
-                    Toast.makeText(this@MainActivity, "Σφάλμα Download: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, "Σφάλμα: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -1130,6 +1186,10 @@ class MainActivity : AppCompatActivity() {
                 val name = when {
                     entry.startsWith("ftp://") -> entry.replace("ftp://", "")
                     entry.startsWith("smb://") -> entry.substringAfter("@")
+                    entry.startsWith("sftp://") -> {
+                        if (entry.contains("@")) entry.substringAfter("@")
+                        else entry.replace("sftp://", "")
+                    }
                     else -> File(entry).name
                 }
                 name to entry
@@ -1148,7 +1208,7 @@ class MainActivity : AppCompatActivity() {
             // --- Εικονίδιο ---
             when {
                 realPath.startsWith("ftp://") -> menuItem.setIcon(android.R.drawable.ic_menu_share)
-                realPath.startsWith("smb://") -> menuItem.setIcon(android.R.drawable.ic_menu_set_as)
+                realPath.startsWith("smb://") || entry.startsWith("SFTP:") -> menuItem.setIcon(android.R.drawable.ic_menu_set_as)
                 else -> menuItem.setIcon(android.R.drawable.ic_dialog_map)
             }
 
@@ -1166,7 +1226,7 @@ class MainActivity : AppCompatActivity() {
                         intent.putExtra("TARGET_HOST", host)
                         startActivity(intent)
                     }
-                    realPath.startsWith("smb://") -> {
+                    realPath.startsWith("smb://") || entry.startsWith("SFTP:") -> {
                         val intent = Intent(this, NetworkClientActivity::class.java)
                         intent.putExtra("FAVORITE_SMB_DATA", entry)
                         startActivity(intent)
@@ -1216,6 +1276,19 @@ class MainActivity : AppCompatActivity() {
                     putExtra("SMB_USER", savedUser)
                     putExtra("SMB_PASS", savedPass)
                     putExtra("FAVORITE_SMB_DATA", "SMB: Favorite*$realPath")
+                }
+                startActivity(intent)
+            }
+
+            // --- ΠΕΡΙΠΤΩΣΗ SFTP (Rebex κτλ) ---
+            realPath.startsWith("sftp://") -> {
+                val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
+                val savedUser = netPrefs.getString("user_$realPath", "") ?: ""
+                val savedPass = netPrefs.getString("pass_$realPath", "") ?: ""
+
+                val intent = Intent(this, NetworkClientActivity::class.java).apply {
+                    // Στέλνουμε το format "SFTP: Favorite*sftp://..."
+                    putExtra("FAVORITE_SMB_DATA", "SFTP: Favorite*$realPath")
                 }
                 startActivity(intent)
             }

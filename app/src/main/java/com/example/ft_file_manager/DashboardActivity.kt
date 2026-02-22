@@ -142,8 +142,13 @@ class DashboardActivity : AppCompatActivity() {
 
                     // Εικονίδιο
                     when {
-                        realPath.startsWith("ftp://") -> menuItem.setIcon(android.R.drawable.ic_menu_share)
-                        realPath.startsWith("smb://") -> menuItem.setIcon(R.drawable.ic_root)
+                        realPath.startsWith("ftp://") -> {
+                            menuItem.setIcon(android.R.drawable.ic_menu_share)
+                        }
+                        realPath.startsWith("smb://") || realPath.startsWith("sftp://") -> {
+                            // Χρησιμοποιούμε το ίδιο εικονίδιο (ic_root) και για τα δύο δίκτυα
+                            menuItem.setIcon(R.drawable.ic_root)
+                        }
                         else -> menuItem.setIcon(R.drawable.ic_folder_yellow)
                     }
 

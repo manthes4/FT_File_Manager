@@ -310,6 +310,19 @@ class NetworkFileActivity : AppCompatActivity() {
                     sftpSession = session
                     sftpChannel = session.openChannel("sftp") as com.jcraft.jsch.ChannelSftp
                     sftpChannel!!.connect()
+                    if (currentPath.isEmpty() || currentPath == "." || currentPath == "/") {
+                        if (!alreadyAskedFavorite) {
+                            withContext(Dispatchers.Main) {
+                                askToSaveFavoriteSFTP(
+                                    host,
+                                    user,
+                                    pass,
+                                    intent.getIntExtra("PORT", 22)
+                                )
+                                alreadyAskedFavorite = true
+                            }
+                        }
+                    }
                 }
 
                 // Στο SFTP το αρχικό path είναι συνήθως το "."
@@ -342,6 +355,24 @@ class NetworkFileActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun askToSaveFavoriteSFTP(host: String, user: String, pass: String, port: Int) {
+        val prefsFav = getSharedPreferences("favorites", MODE_PRIVATE)
+        val savedPaths = prefsFav.getString("paths_ordered", "") ?: ""
+        if (savedPaths.contains("SFTP: $host")) return
+
+        AlertDialog.Builder(this)
+            .setTitle("Αποθήκευση Σύνδεσης")
+            .setMessage("Θέλετε να αποθηκεύσετε το SFTP στο $host;")
+            .setPositiveButton("Ναι") { _, _ ->
+                val favoritePaths = if (savedPaths.isEmpty()) mutableListOf() else savedPaths.split("|").toMutableList()
+                // Format: SFTP: Host*sftp://user:pass@host:port
+                val entryToSave = "SFTP: $host*sftp://$user:$pass@$host:$port"
+                favoritePaths.add(entryToSave)
+                prefsFav.edit().putString("paths_ordered", favoritePaths.joinToString("|")).apply()
+                Toast.makeText(this, "Αποθηκεύτηκε!", Toast.LENGTH_SHORT).show()
+            }.setNegativeButton("Όχι", null).show()
     }
 
     private fun askToSaveFavoriteSMB(host: String, user: String, pass: String) {
