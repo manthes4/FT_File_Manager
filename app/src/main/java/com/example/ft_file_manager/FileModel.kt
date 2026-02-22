@@ -6,5 +6,7 @@ data class FileModel(
     val isDirectory: Boolean,
     var size: CharSequence,
     val isRoot: Boolean = false,
-    var isSelected: Boolean = false // <--- Νέα προσθήκη
+    var isSelected: Boolean = false, // <--- Νέα προσθήκη
+    val lastModifiedCached: Long = 0, // <--- ΠΡΟΣΘΕΣΕ ΑΥΤΟ ΕΔΩ
+    var lastModified: Long = 0
 )

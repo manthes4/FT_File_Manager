@@ -46,6 +46,7 @@ class MainActivity : AppCompatActivity() {
     private var isSelectionMode = false // Αυτή η γραμμή έλειπε!
     private var bulkFilesToMove = listOf<FileModel>() // Νέα μεταβλητή στην κορυφή της κλάσης!
     private val sizeCache = mutableMapOf<String, CharSequence>()
+    private lateinit var adapter: FileAdapter
 
     private var protocol = "SMB"
     private var host = ""
@@ -98,9 +99,10 @@ class MainActivity : AppCompatActivity() {
                 return Glide.with(this@MainActivity)
                     .asBitmap()
                     .load(File(item.path))
-                    .signature(ObjectKey("${item.path}_${File(item.path).lastModified()}"))
+                    // Αφαίρεσε το File(item.path).lastModified()
+                    .signature(ObjectKey(item.path))
                     .override(150, 150)
-                    .diskCacheStrategy(DiskCacheStrategy.ALL)
+                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE) // Αποθήκευσε μόνο το thumbnail
                     .centerCrop()
             }
         }
@@ -109,17 +111,11 @@ class MainActivity : AppCompatActivity() {
         val preloader = com.bumptech.glide.integration.recyclerview.RecyclerViewPreloader<FileModel>(
             Glide.with(this), modelProvider, sizeProvider, 30
         )
-        binding.recyclerView.addOnScrollListener(preloader)
-
-        // 1. Ρυθμίσεις απόδοσης που βάλαμε πριν
-        // 1. Ρυθμίσεις απόδοσης - ΑΝΤΙΚΑΤΑΣΤΑΣΗ
-        val myLayoutManager = LinearLayoutManager(this@MainActivity)
-        myLayoutManager.initialPrefetchItemCount = 10 // Του λέμε να "κοιτάζει" 10 items παρακάτω
-
+        // Στην onCreate της MainActivity.kt:
         binding.recyclerView.apply {
-            layoutManager = myLayoutManager
-            setHasFixedSize(true)
-            setItemViewCacheSize(30) // Κρατάει 30 views έτοιμα
+            layoutManager = LinearLayoutManager(this@MainActivity)
+            setHasFixedSize(true) // Βοηθάει πολύ στην ταχύτητα
+            setItemViewCacheSize(20) // Κρατάει 20 στοιχεία έτοιμα στη μνήμη
         }
 
         // 2. ΕΔΩ ΜΠΑΙΝΕΙ Ο SCROLL LISTENER
@@ -355,68 +351,65 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadFiles(directory: File) {
         currentPath = directory
-
-        // Ο μοναδικός τίτλος
         val displayTitle = getDisplayTitle(directory.absolutePath)
         supportActionBar?.title = displayTitle
         binding.toolbar.title = displayTitle
 
-        // Καθαρισμός cache
-       // sizeCache.remove(directory.absolutePath)
+        // Χρησιμοποιούμε lifecycleScope αντί για MainScope για καλύτερη διαχείριση μνήμης
+        lifecycleScope.launch {
+            val fileList = withContext(Dispatchers.IO) {
+                val tempArrayList = mutableListOf<FileModel>()
+                val files = try { directory.listFiles() } catch (e: Exception) { null }
 
-        MainScope().launch {
-            val fileList = mutableListOf<FileModel>()
-            var files = withContext(Dispatchers.IO) { directory.listFiles() }
+                if (files != null) {
+                    for (file in files) {
+                        val cachedSize = sizeCache[file.absolutePath]
+                        val lastModValue = file.lastModified()
 
-            if (files != null) {
-                files.forEach {
-                    val cachedSize = sizeCache[it.absolutePath]
-                    fileList.add(
-                        FileModel(
-                            it.name,
-                            it.absolutePath,
-                            it.isDirectory,
-                            // Χρησιμοποιούμε "--" για να ξέρει ο FolderCalculator να ξεκινήσει
-                            cachedSize ?: if (it.isDirectory) "--" else FolderCalculator.formatSize(it.length()),
-                            false
-                        )
-                    )
-                }
-            } else {
-                // ROOT / BYPASS MODE: Εδώ "πιάνουμε" και τους περίεργους χαρακτήρες
-                // Προσθέτουμε το -p για να ξεχωρίζουμε φακέλους και το -N για raw names
-                val cmd =
-                    "export LANG=en_US.UTF-8; ls -p -N --color=never \"${directory.absolutePath}\""
-                val output = RootTools.getOutput(cmd)
-
-                if (output.isNotEmpty() && !output.contains("Error:")) {
-                    output.split("\n").forEach { line ->
-                        val name = line.trim()
-                        if (name.isNotEmpty()) {
-                            val isDir = name.endsWith("/")
-                            val cleanName = if (isDir) name.dropLast(1) else name
-                            val fullPath = "${directory.absolutePath}/$cleanName".replace("//", "/")
-
-                            // ΕΛΕΓΧΟΣ CACHE: Αν το έχουμε ήδη μετρήσει, το δείχνουμε αμέσως
-                            val cachedSize = sizeCache[fullPath]
-
-                            fileList.add(
-                                FileModel(
-                                    cleanName,
-                                    fullPath,
-                                    isDir,
-                                    // Εδώ βάζουμε επίσης "--" για τους φακέλους συστήματος
-                                    cachedSize ?: if (isDir) "--" else "System File",
-                                    false
-                                )
+                        tempArrayList.add(
+                            FileModel(
+                                name = file.name,
+                                path = file.absolutePath,
+                                isDirectory = file.isDirectory,
+                                size = cachedSize ?: if (file.isDirectory) "--" else FolderCalculator.formatSize(file.length()),
+                                isSelected = false,
+                                lastModifiedCached = lastModValue // <--- Πρόσεξε το κόμμα στην προηγούμενη γραμμή!
                             )
+                        )
+                    }
+                } else {
+                    // ROOT / BYPASS MODE
+                    val cmd = "export LANG=en_US.UTF-8; ls -p -N --color=never \"${directory.absolutePath}\""
+                    val output = RootTools.getOutput(cmd)
+                    if (output.isNotEmpty() && !output.contains("Error:")) {
+                        output.split("\n").forEach { line ->
+                            val name = line.trim()
+                            if (name.isNotEmpty()) {
+                                val isDir = name.endsWith("/")
+                                val cleanName = if (isDir) name.dropLast(1) else name
+                                val fullPath = File(directory, cleanName).absolutePath
+                                val cachedSize = sizeCache[fullPath]
+
+                                tempArrayList.add(
+                                    FileModel(
+                                        cleanName,
+                                        fullPath,
+                                        isDir,
+                                        cachedSize ?: if (isDir) "--" else "System File",
+                                        false
+                                    )
+                                )
+                            }
                         }
                     }
                 }
+
+                // Η ΤΑΞΙΝΟΜΗΣΗ ΓΙΝΕΤΑΙ ΕΔΩ (Στο IO Thread)
+                tempArrayList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
+                tempArrayList // Επιστρέφει την έτοιμη λίστα
             }
 
-            // Ταξινόμηση και update adapter
-            fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
+            // Μόνο η ενημέρωση του Adapter γίνεται στο Main Thread
             fullFileList = fileList
             updateAdapter(fileList)
         }
@@ -443,21 +436,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateAdapter(list: List<FileModel>) {
-        val adapter = FileAdapter(
+        // Δημιουργούμε τον adapter και τον αποθηκεύουμε στη lateinit μεταβλητή της κλάσης
+        adapter = FileAdapter(
             list,
             isInSelectionMode = isSelectionMode,
             onItemClick = { selectedFile ->
-                // ΑΝ είμαστε σε λειτουργία επιλογής, τότε το απλό πάτημα επιλέγει/αποεπιλέγει
                 if (isSelectionMode) {
                     selectedFile.isSelected = !selectedFile.isSelected
-                    binding.recyclerView.adapter?.notifyDataSetChanged()
-
-                    // Ενημέρωση τίτλου και μενού
+                    adapter.notifyDataSetChanged() // Χρήση της μεταβλητής πλέον
                     val count = fullFileList.count { it.isSelected }
                     if (count == 0) exitSelectionMode()
                     else binding.toolbar.title = "$count επιλεγμένα"
                 } else {
-                    // ΑΝ ΔΕΝ είμαστε σε selection mode, άνοιξε το αρχείο κανονικά
                     val file = File(selectedFile.path)
                     if (selectedFile.isDirectory) loadFiles(file) else openFile(file)
                 }
@@ -477,6 +467,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         )
+
+        // Τώρα τον συνδέουμε με το UI
         binding.recyclerView.adapter = adapter
     }
 

@@ -63,45 +63,42 @@ class FileAdapter(
         // Καθαρισμός και φόρτωση εικονιδίου (Glide κτλ)
         Glide.with(holder.itemView.context).clear(holder.icon)
 
-        // FileAdapter.kt -> onBindViewHolder
+        // Μέσα στην onBindViewHolder, εκεί που ελέγχεις αν είναι φάκελος:
         if (fileModel.isDirectory) {
             holder.icon.setImageResource(R.drawable.ic_folder_yellow)
 
-            // 1. Ακύρωση οποιουδήποτε προηγούμενου Runnable είναι δεμένο με αυτό το View
+            // Ακύρωση τυχόν προηγούμενου αιτήματος για αυτό το view
             holder.itemView.removeCallbacks(null)
 
-            // 2. Έλεγχος αν το μέγεθος είναι ήδη γνωστό (Cache)
-            if (fileModel.size == "--" || fileModel.size.isEmpty()) {
-                holder.info.text = "Υπολογισμός..."
+            if (fileModel.size == "--" || fileModel.size == "...") {
+                holder.info.text = "..."
 
-                // 3. Χρησιμοποιούμε ένα runnable για να δώσουμε χρόνο στο scroll να αναπνεύσει
-                val folderRunnable = Runnable {
-                    FolderCalculator.calculateFolderSize(fileModel, position, this)
+                // Δημιουργούμε ένα Runnable με καθυστέρηση 400ms
+                val runnable = Runnable {
+                    FolderCalculator.calculateFolderSize(fileModel, holder.adapterPosition, this)
                 }
-
-                // Αποθηκεύουμε το runnable στο tag του view για να μπορούμε να το ελέγξουμε
-                holder.itemView.tag = folderRunnable
-                holder.itemView.postDelayed(folderRunnable, 400) // Αυξημένο delay στα 400ms
+                holder.itemView.postDelayed(runnable, 400)
+                holder.itemView.tag = runnable // Αποθήκευση για να το ακυρώσουμε αν χρειαστεί
             } else {
                 holder.info.text = fileModel.size
             }
 
         } else {
             // Λογική εικονιδίων για αρχεία
+            // Μέσα στην onBindViewHolder του FileAdapter.kt
             if (!fileModel.path.startsWith("ftp://") &&
                 extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "mp4", "mkv", "mov")) {
-
-                Glide.with(holder.icon.context)
-                    .asBitmap()
-                    .load(file)
-                    // Χρησιμοποίησε μόνο το path αν είσαι σίγουρος ότι τα αρχεία δεν αλλάζουν περιεχόμενο συχνά
-                    // ή βάλε το lastModified() διαιρεμένο δια 1000 για να αγνοεί τα milliseconds
-                    .signature(ObjectKey(file.absolutePath + (file.lastModified() / 1000)))
-                    .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565)
-                    .override(100, 100)
-                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE) // RESOURCE = Αποθηκεύει μόνο το 100x100 thumbnail
-                    .placeholder(R.drawable.ic_image_placeholder)
-                    .into(holder.icon)
+                    Glide.with(holder.icon.context)
+                        .asBitmap() // Πολύ πιο γρήγορο από το να φορτώνει ολόκληρο το drawable
+                        .load(fileModel.path)
+                        // Χρήση ΜΟΝΟ του cache key. ΠΟΤΕ file.lastModified() εδώ!
+                        .signature(ObjectKey(fileModel.path + fileModel.lastModifiedCached))
+                        .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565) // 50% λιγότερη RAM
+                        .override(100, 100) // Thumbnail size
+                        .diskCacheStrategy(DiskCacheStrategy.RESOURCE) // Αποθήκευση μόνο του μικρού αρχείου
+                        .thumbnail(0.1f) // Φόρτωσε ακαριαία μια θολή εικόνα
+                        .placeholder(R.drawable.ic_image_placeholder)
+                        .into(holder.icon)
             } else {
                 // Στατικά εικονίδια για FTP ή μη-εικόνες
                 when (extension) {
@@ -158,12 +155,13 @@ class FileAdapter(
 
     override fun onViewRecycled(holder: FileViewHolder) {
         super.onViewRecycled(holder)
+        // Ακύρωση του Glide request
+        Glide.with(holder.itemView.context).clear(holder.icon)
+        // Ακύρωση του εκκρεμούς υπολογισμού μεγέθους
         val runnable = holder.itemView.tag as? Runnable
         if (runnable != null) {
             holder.itemView.removeCallbacks(runnable)
         }
-        holder.itemView.tag = null
-        Glide.with(holder.itemView.context).clear(holder.icon)
     }
 
     override fun getItemCount() = files.size
