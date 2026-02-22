@@ -120,41 +120,45 @@ class NetworkClientActivity : AppCompatActivity() {
             }
         }
 
-        // --- ΕΛΕΓΧΟΣ ΓΙΑ ΣΥΝΔΕΣΗ ΑΠΟ DASHBOARD Ή ΑΓΑΠΗΜΕΝΑ ---
-
-        // --- ΕΛΕΓΧΟΣ ΓΙΑ ΣΥΝΔΕΣΗ ΑΠΟ DASHBOARD Ή ΑΓΑΠΗΜΕΝΑ ---
-        // --- Στην onCreate της NetworkClientActivity ---
+// --- ΕΛΕΓΧΟΣ ΓΙΑ ΣΥΝΔΕΣΗ ΑΠΟ DASHBOARD Ή ΑΓΑΠΗΜΕΝΑ ---
         val targetPath = intent.getStringExtra("TARGET_SMB_PATH") ?: ""
-        var userExtra = intent.getStringExtra("SMB_USER") ?: ""
-        var passExtra = intent.getStringExtra("SMB_PASS") ?: ""
+        val favoriteData = intent.getStringExtra("FAVORITE_SMB_DATA")
 
-        if (targetPath.isNotEmpty()) {
-            var host = targetPath.removePrefix("smb://")
+        if (!favoriteData.isNullOrEmpty()) {
+            // 1. ΠΡΟΤΕΡΑΙΟΤΗΤΑ: Αν υπάρχει το "FAVORITE_SMB_DATA", άσε την loadFavoriteIntoFields να τα κάνει όλα
+            // Αυτή η συνάρτηση ξέρει ήδη να ξεχωρίζει SFTP/SMB και να κάνει connect
+            loadFavoriteIntoFields(favoriteData)
+        }
+        else if (targetPath.isNotEmpty()) {
+            // 2. BACKUP: Αν για κάποιο λόγο δεν υπάρχει το παραπάνω, έλεγξε το targetPath
+            val isSftp = targetPath.startsWith("sftp://")
+            val prefix = if (isSftp) "sftp://" else "smb://"
+
+            var host = targetPath.removePrefix(prefix)
             if (host.contains("@")) host = host.substringAfter("@")
 
-            // ΔΙΚΛΕΙΔΑ ΑΣΦΑΛΕΙΑΣ: Αν τα extras ήρθαν κενά από το Dashboard, ψάξε τα εδώ
+            var userExtra = intent.getStringExtra("SMB_USER") ?: ""
+            var passExtra = intent.getStringExtra("SMB_PASS") ?: ""
+
+            // Αναζήτηση αν λείπουν
             if (userExtra.isEmpty()) {
                 val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
-                userExtra = netPrefs.getString("user_smb://$host", "")
-                    ?: netPrefs.getString("user_$host", "") ?: ""
-                passExtra = netPrefs.getString("pass_smb://$host", "")
-                    ?: netPrefs.getString("pass_$host", "") ?: ""
+                userExtra = netPrefs.getString("user_$prefix$host", "") ?: ""
+                passExtra = netPrefs.getString("pass_$prefix$host", "") ?: ""
             }
 
             findViewById<EditText>(R.id.etHost).setText(host)
             findViewById<EditText>(R.id.etUser).setText(userExtra)
             findViewById<EditText>(R.id.etPass).setText(passExtra)
-            findViewById<RadioButton>(R.id.rbSmb).isChecked = true
 
-            if (userExtra.isNotEmpty()) {
-                connectToSMB(host, userExtra, passExtra, 445)
-            }
-        }
-        // 2. Αν δεν υπάρχουν αυτά, έλεγξε το παλιό format (FAVORITE_SMB_DATA)
-        else {
-            val favoriteData = intent.getStringExtra("FAVORITE_SMB_DATA")
-            if (!favoriteData.isNullOrEmpty()) {
-                loadFavoriteIntoFields(favoriteData)
+            if (isSftp) {
+                findViewById<RadioButton>(R.id.rbSftp).isChecked = true
+                findViewById<EditText>(R.id.etPort).setText("22")
+                if (userExtra.isNotEmpty()) connectToSFTP(host, userExtra, passExtra, 22)
+            } else {
+                findViewById<RadioButton>(R.id.rbSmb).isChecked = true
+                findViewById<EditText>(R.id.etPort).setText("445")
+                if (userExtra.isNotEmpty()) connectToSMB(host, userExtra, passExtra, 445)
             }
         }
     }
@@ -362,7 +366,6 @@ class NetworkClientActivity : AppCompatActivity() {
 
     private fun loadFavoriteIntoFields(fav: String) {
         try {
-            // 1. Διάγνωση πρωτοκόλλου
             val isSftpFavorite = fav.startsWith("SFTP:")
             val fullUri = fav.substringAfter("*").trim()
 
@@ -371,34 +374,39 @@ class NetworkClientActivity : AppCompatActivity() {
             var pass = ""
             var port = if (isSftpFavorite) 22 else 445
 
-            if (fullUri.contains("@")) {
-                // ΠΕΡΙΠΤΩΣΗ Α: user:pass@host (Από MainActivity favorites)
-                val cleanUri = if (isSftpFavorite) {
-                    fullUri.removePrefix("sftp://")
-                } else {
-                    fullUri.removePrefix("smb://")
-                }
+            // 1. Ενημέρωση του RadioButton ΠΡΩΤΑ
+            // Αυτό είναι κρίσιμο για να ξέρει η Activity σε τι mode βρίσκεται
+            if (isSftpFavorite) {
+                findViewById<RadioButton>(R.id.rbSftp).isChecked = true
+            } else {
+                findViewById<RadioButton>(R.id.rbSmb).isChecked = true
+            }
 
+            if (fullUri.contains("@")) {
+                // ΠΕΡΙΠΤΩΣΗ Α: user:pass@host
+                val cleanUri = if (isSftpFavorite) fullUri.removePrefix("sftp://") else fullUri.removePrefix("smb://")
                 val userPass = cleanUri.substringBefore("@")
-                val hostPort = cleanUri.substringAfter("@")
+                val hostPort = cleanUri.substringAfter("@").substringBefore("/") // Κόβουμε τυχόν φακέλους μετά το host
 
                 user = userPass.substringBefore(":")
                 pass = userPass.substringAfter(":")
 
-                // Έλεγχος αν το host έχει και port (π.χ. 192.168.1.5:2222)
                 if (hostPort.contains(":")) {
                     host = hostPort.substringBefore(":")
-                    port = hostPort.substringAfter(":").toInt()
+                    port = hostPort.substringAfter(":").toIntOrNull() ?: port
                 } else {
                     host = hostPort
                 }
             } else {
-                // ΠΕΡΙΠΤΩΣΗ Β: Απλό host (Από Dashboard)
-                host = if (isSftpFavorite) fullUri.removePrefix("sftp://") else fullUri.removePrefix("smb://")
+                // ΠΕΡΙΠΤΩΣΗ Β: Απλό URI (Από Dashboard)
+                // Καθαρίζουμε το host ώστε να μην περιέχει τα folders (π.χ. 192.168.1.5/Videos -> 192.168.1.5)
+                val tempHost = if (isSftpFavorite) fullUri.removePrefix("sftp://") else fullUri.removePrefix("smb://")
+                host = tempHost.substringBefore("/")
 
                 val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
                 val prefix = if (isSftpFavorite) "sftp" else "smb"
 
+                // Δοκιμάζουμε να βρούμε τα credentials
                 user = netPrefs.getString("user_${prefix}://$host", "") ?: ""
                 pass = netPrefs.getString("pass_${prefix}://$host", "") ?: ""
 
@@ -408,30 +416,26 @@ class NetworkClientActivity : AppCompatActivity() {
                 }
             }
 
-            // 2. Ενημέρωση UI - Αυτό θα ενεργοποιήσει αυτόματα τους Listeners που φτιάξαμε!
-            if (isSftpFavorite) {
-                findViewById<RadioButton>(R.id.rbSftp).isChecked = true
-            } else {
-                findViewById<RadioButton>(R.id.rbSmb).isChecked = true
-            }
-
+            // 2. Ενημέρωση UI πεδίων
             findViewById<EditText>(R.id.etHost).setText(host)
             findViewById<EditText>(R.id.etUser).setText(user)
             findViewById<EditText>(R.id.etPass).setText(pass)
             findViewById<EditText>(R.id.etPort).setText(port.toString())
 
-            // 3. ΑΥΤΟΜΑΤΗ ΣΥΝΔΕΣΗ
+            // 3. ΑΥΤΟΜΑΤΗ ΣΥΝΔΕΣΗ (με ένα μικρό delay για να "προλάβει" το UI)
             if (host.isNotEmpty() && user.isNotEmpty()) {
-                if (isSftpFavorite) {
-                    connectToSFTP(host, user, pass, port)
-                } else {
-                    connectToSMB(host, user, pass, port)
-                }
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    if (isSftpFavorite) {
+                        connectToSFTP(host, user, pass, port)
+                    } else {
+                        connectToSMB(host, user, pass, port)
+                    }
+                }, 500) // 500ms είναι αρκετά για να φανεί η αλλαγή
             } else {
-                Toast.makeText(this, "Στοιχεία σύνδεσης μη διαθέσιμα", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Παρακαλώ συμπληρώστε τα στοιχεία σύνδεσης", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
-            Log.e("FAV_ERROR", "Error", e)
+            Log.e("FAV_ERROR", "Error parsing favorite", e)
         }
     }
 

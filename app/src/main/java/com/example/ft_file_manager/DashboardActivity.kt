@@ -184,18 +184,25 @@ class DashboardActivity : AppCompatActivity() {
                 startActivity(Intent(this, FtpActivity::class.java).putExtra("TARGET_HOST", host))
             }
 
-            realPath.startsWith("smb://") -> {
+            realPath.startsWith("smb://") || realPath.startsWith("sftp://") -> {
+                val isSftp = realPath.startsWith("sftp://")
+                val protocolPrefix = if (isSftp) "sftp://" else "smb://"
+                val favoriteLabel = if (isSftp) "SFTP:" else "SMB:"
+
                 val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
+
+                // Τραβάμε τα αποθηκευμένα user/pass
                 val savedUser = netPrefs.getString("user_$realPath", null)
-                    ?: netPrefs.getString("user_${realPath.removePrefix("smb://")}", "")
+                    ?: netPrefs.getString("user_${realPath.removePrefix(protocolPrefix)}", "")
                 val savedPass = netPrefs.getString("pass_$realPath", null)
-                    ?: netPrefs.getString("pass_${realPath.removePrefix("smb://")}", "")
+                    ?: netPrefs.getString("pass_${realPath.removePrefix(protocolPrefix)}", "")
 
                 val intent = Intent(this, NetworkClientActivity::class.java).apply {
-                    putExtra("TARGET_SMB_PATH", realPath)
+                    putExtra("TARGET_SMB_PATH", realPath) // Κρατάμε το όνομα για συμβατότητα
                     putExtra("SMB_USER", savedUser)
                     putExtra("SMB_PASS", savedPass)
-                    putExtra("FAVORITE_SMB_DATA", "SMB: Favorite*$realPath")
+                    // Εδώ στέλνουμε το label (π.χ. "SFTP: Favorite*sftp://...")
+                    putExtra("FAVORITE_SMB_DATA", "$favoriteLabel Favorite*$realPath")
                 }
                 startActivity(intent)
             }
@@ -327,15 +334,13 @@ class DashboardActivity : AppCompatActivity() {
                 if (parts.size == 2) {
                     val path = parts[1]
                     // Προσθήκη αν είναι τοπικό αρχείο που υπάρχει ή αν είναι δικτυακό (smb/ftp)
-                    if (path.startsWith("smb://") || path.startsWith("ftp://") || File(path).exists()) {
-                        storageItems.add(
-                            DashboardItem(
-                                5,
-                                parts[0],
-                                path,
-                                R.drawable.ic_folder_yellow
-                            )
-                        )
+                    if (path.startsWith("smb://") || path.startsWith("ftp://") || path.startsWith("sftp://") || File(path).exists()) {
+                        // Επιλογή εικονιδίου ανάλογα με το αν είναι δίκτυο ή τοπικό
+                        val icon = when {
+                            path.startsWith("smb://") || path.startsWith("sftp://") -> R.drawable.ic_root // Εικονίδιο δικτύου
+                            path.startsWith("ftp://") -> android.R.drawable.ic_menu_share
+                            else -> R.drawable.ic_folder_yellow
+                        }
                     }
                 }
             }
@@ -354,9 +359,15 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun updateSpaceInfo(item: DashboardItem) {
-        // Αν δεν υπάρχει path ή αν είναι εικονικό/δικτυακό, μην προχωράς
-        if (item.path == null || item.id == 4 || item.id == 7 || item.path!!.startsWith("smb://")) {
-            item.totalSpace = "" // Προαιρετικά άδειασέ το
+        // Προσθήκη ελέγχου για sftp:// ώστε να μην κρασάρει προσπαθώντας να διαβάσει τοπικά
+        if (item.path == null ||
+            item.id == 4 ||
+            item.id == 7 ||
+            item.path!!.startsWith("smb://") ||
+            item.path!!.startsWith("sftp://") ||
+            item.path!!.startsWith("ftp://")) {
+
+            item.totalSpace = ""
             return
         }
 
@@ -401,33 +412,32 @@ class DashboardActivity : AppCompatActivity() {
             else -> {
                 val path = item.path ?: ""
 
-                if (path.startsWith("smb://")) {
-                    // --- ΔΙΟΡΘΩΣΗ ΕΔΩ ---
-                    // Διαβάζουμε τα στοιχεία από τη μνήμη πριν ανοίξουμε την Activity
-                    // Μέσα στην onItemClick, στο κομμάτι που ελέγχει το path.startsWith("smb://")
-                    // Μέσα στο DashboardActivity (onItemClick)
+                if (path.startsWith("smb://") || path.startsWith("sftp://")) {
+                    val isSftp = path.startsWith("sftp://")
+                    val protocolPrefix = if (isSftp) "sftp://" else "smb://"
+                    val favoriteLabel = if (isSftp) "SFTP:" else "SMB:"
+
                     val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
 
-// Δοκιμάζουμε όλους τους πιθανούς συνδυασμούς κλειδιών
+                    // Αναζήτηση credentials με βάση το path
                     val savedUser = netPrefs.getString("user_$path", null)
-                        ?: netPrefs.getString("user_${path.removePrefix("smb://")}", null)
-                        ?: netPrefs.getString("user_smb://${path.removePrefix("smb://")}", "")
+                        ?: netPrefs.getString("user_${path.removePrefix(protocolPrefix)}", "")
 
                     val savedPass = netPrefs.getString("pass_$path", null)
-                        ?: netPrefs.getString("pass_${path.removePrefix("smb://")}", null)
-                        ?: netPrefs.getString("pass_smb://${path.removePrefix("smb://")}", "")
+                        ?: netPrefs.getString("pass_${path.removePrefix(protocolPrefix)}", "")
 
                     val intent = Intent(this, NetworkClientActivity::class.java).apply {
                         putExtra("TARGET_SMB_PATH", path)
                         putExtra("SMB_USER", savedUser)
                         putExtra("SMB_PASS", savedPass)
-
-                        // Προσθέτουμε και αυτό για να ενεργοποιηθεί η αυτόματη σύνδεση
-                        // αν η NetworkClientActivity το περιμένει σε αυτό το Extra
-                        putExtra("FAVORITE_SMB_DATA", "SMB: Favorite*$path")
+                        // Σημαντικό: Στέλνουμε το σωστό Label για να ξέρει η επόμενη Activity τι να κάνει
+                        putExtra("FAVORITE_SMB_DATA", "$favoriteLabel Favorite*$path")
+                        // Περνάμε και το PROTOCOL ρητά για σιγουριά
+                        putExtra("PROTOCOL", if (isSftp) "SFTP" else "SMB")
                     }
                     startActivity(intent)
                 } else {
+                    // Κανονικοί τοπικοί φάκελοι
                     val intent = Intent(this, MainActivity::class.java)
                     intent.putExtra("START_PATH", path)
                     startActivity(intent)
