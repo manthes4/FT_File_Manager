@@ -32,19 +32,20 @@ object FolderCalculator {
                 val root = File(fileModel.path)
                 val result = getFolderDataRecursive(root)
 
-                // Δημιουργία του πολύχρωμου κειμένου
+                // 1. Δημιουργία του πολύχρωμου κειμένου
                 val spannable = buildColorfulInfo(result.fileCount, result.folderCount, result.size)
 
                 mainHandler.post {
-                    // Ενημερώνουμε το model με το string (για την cache)
-                    fileModel.size = spannable.toString()
-                    // Στέλνουμε το Spannable στο payload του adapter
+                    // ΔΙΟΡΘΩΣΗ: Αποθηκεύουμε το spannable (CharSequence) για να μείνουν τα χρώματα
+                    fileModel.size = spannable
                     adapter.notifyItemChanged(position, spannable)
                 }
             } catch (e: Exception) {
                 mainHandler.post {
-                    fileModel.size = "Error"
-                    adapter.notifyItemChanged(position, "Error")
+                    // Στο catch βάζουμε σταθερό κείμενο, γιατί η μεταβλητή spannable δεν υπάρχει εδώ
+                    val errorText = "Error"
+                    fileModel.size = errorText
+                    adapter.notifyItemChanged(position, errorText)
                 }
             }
         }

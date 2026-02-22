@@ -4,7 +4,7 @@ data class FileModel(
     val name: String,
     val path: String,
     val isDirectory: Boolean,
-    var size: String,
+    var size: CharSequence,
     val isRoot: Boolean = false,
     var isSelected: Boolean = false // <--- Νέα προσθήκη
 )

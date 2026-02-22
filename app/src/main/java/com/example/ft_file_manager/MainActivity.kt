@@ -284,9 +284,11 @@ class MainActivity : AppCompatActivity() {
                     val cachedSize = sizeCache[it.absolutePath]
                     fileList.add(
                         FileModel(
-                            it.name, it.absolutePath, it.isDirectory,
-                            cachedSize
-                                ?: if (it.isDirectory) "..." else FolderCalculator.formatSize(it.length()),
+                            it.name,
+                            it.absolutePath,
+                            it.isDirectory,
+                            // Χρησιμοποιούμε "--" για να ξέρει ο FolderCalculator να ξεκινήσει
+                            cachedSize ?: if (it.isDirectory) "--" else FolderCalculator.formatSize(it.length()),
                             false
                         )
                     )
@@ -314,7 +316,8 @@ class MainActivity : AppCompatActivity() {
                                     cleanName,
                                     fullPath,
                                     isDir,
-                                    cachedSize ?: if (isDir) "..." else "System File",
+                                    // Εδώ βάζουμε επίσης "--" για τους φακέλους συστήματος
+                                    cachedSize ?: if (isDir) "--" else "System File",
                                     false
                                 )
                             )
