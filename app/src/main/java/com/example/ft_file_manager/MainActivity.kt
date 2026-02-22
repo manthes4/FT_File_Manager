@@ -28,6 +28,8 @@ import java.util.Collections
 import kotlin.jvm.java
 import androidx.lifecycle.lifecycleScope
 import com.bumptech.glide.Glide
+import com.bumptech.glide.load.engine.DiskCacheStrategy
+import com.bumptech.glide.signature.ObjectKey
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -64,11 +66,47 @@ class MainActivity : AppCompatActivity() {
         }
         updateDrawerMenu()
 
+        // 1. Ορίζουμε το μέγεθος των thumbnails για τον προ-φορτωτή
+        val sizeProvider = com.bumptech.glide.util.FixedPreloadSizeProvider<FileModel>(150, 150)
+
+// 2. Ορίζουμε ποια αρχεία θα προ-φορτώνονται (μόνο εικόνες/βίντεο)
+        val modelProvider = object : com.bumptech.glide.ListPreloader.PreloadModelProvider<FileModel> {
+            override fun getPreloadItems(position: Int): List<FileModel> {
+                val item = fullFileList.getOrNull(position)
+                // Προ-φορτώνουμε μόνο αν είναι αρχείο και όχι φάκελος
+                return if (item != null && !item.isDirectory && isImageOrVideo(item.path)) {
+                    listOf(item)
+                } else {
+                    emptyList()
+                }
+            }
+
+            override fun getPreloadRequestBuilder(item: FileModel): com.bumptech.glide.RequestBuilder<*> {
+                return Glide.with(this@MainActivity)
+                    .asBitmap()
+                    .load(File(item.path))
+                    .signature(ObjectKey("${item.path}_${File(item.path).lastModified()}"))
+                    .override(150, 150)
+                    .diskCacheStrategy(DiskCacheStrategy.ALL)
+                    .centerCrop()
+            }
+        }
+
+// 3. Σύνδεση του Preloader με το RecyclerView (Προ-φορτώνουμε 30 στοιχεία μπροστά!)
+        val preloader = com.bumptech.glide.integration.recyclerview.RecyclerViewPreloader<FileModel>(
+            Glide.with(this), modelProvider, sizeProvider, 30
+        )
+        binding.recyclerView.addOnScrollListener(preloader)
+
         // 1. Ρυθμίσεις απόδοσης που βάλαμε πριν
+        // 1. Ρυθμίσεις απόδοσης - ΑΝΤΙΚΑΤΑΣΤΑΣΗ
+        val myLayoutManager = LinearLayoutManager(this@MainActivity)
+        myLayoutManager.initialPrefetchItemCount = 10 // Του λέμε να "κοιτάζει" 10 items παρακάτω
+
         binding.recyclerView.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
+            layoutManager = myLayoutManager
             setHasFixedSize(true)
-            setItemViewCacheSize(30)
+            setItemViewCacheSize(30) // Κρατάει 30 views έτοιμα
         }
 
         // 2. ΕΔΩ ΜΠΑΙΝΕΙ Ο SCROLL LISTENER
@@ -85,6 +123,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+
+        // Δίνει προτεραιότητα στο UI thread για πιο ομαλή κίνηση
+        window.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+        )
 
         // 1. Toolbar Navigation (Drawer)
         binding.toolbar.setNavigationOnClickListener {
@@ -283,6 +327,13 @@ class MainActivity : AppCompatActivity() {
             binding.drawerLayout.closeDrawers()
             true
         }
+    }
+
+    private fun isImageOrVideo(path: String): Boolean {
+        val extension = path.substringAfterLast('.', "").lowercase()
+        val imageExtensions = listOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
+        val videoExtensions = listOf("mp4", "mkv", "avi", "mov", "3gp")
+        return imageExtensions.contains(extension) || videoExtensions.contains(extension)
     }
 
     private fun loadFiles(directory: File) {

@@ -17,6 +17,7 @@
         android:label="FT File Manager"
         android:requestLegacyExternalStorage="true"
         android:usesCleartextTraffic="true"
+        android:hardwareAccelerated="true"
         android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar">
 

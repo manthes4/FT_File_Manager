@@ -11,6 +11,7 @@ import com.bumptech.glide.Glide
 import java.io.File
 import android.webkit.MimeTypeMap
 import com.bumptech.glide.load.engine.DiskCacheStrategy
+import com.bumptech.glide.signature.ObjectKey
 
 class FileAdapter(
     private val files: List<FileModel>,
@@ -53,30 +54,29 @@ class FileAdapter(
         // Καθαρισμός και φόρτωση εικονιδίου (Glide κτλ)
         Glide.with(holder.itemView.context).clear(holder.icon)
 
+        // FileAdapter.kt -> onBindViewHolder
         if (fileModel.isDirectory) {
             holder.icon.setImageResource(R.drawable.ic_folder_yellow)
 
-            // 1. Ακυρώνουμε τυχόν προηγούμενο αίτημα για να μην μπερδευτεί το scroll
-            holder.itemView.handler?.removeCallbacksAndMessages(null)
+            holder.itemView.removeCallbacks(null) // ΠΟΛΥ ΣΗΜΑΝΤΙΚΟ: Ακύρωση του προηγούμενου
 
-            // 2. Ξεκινάει τον υπολογισμό μόνο αν το item μείνει σταθερό για 100ms
-            // Αν ο χρήστης σκρολάρει γρήγορα, το postDelayed θα ακυρώνεται συνεχώς
             holder.itemView.postDelayed({
                 FolderCalculator.calculateFolderSize(fileModel, position, this)
-            }, 100)
+            }, 200) // 200ms είναι ο ιδανικός χρόνος για να καταλάβει το σύστημα ότι σταμάτησες το σκρολάρισμα
 
         } else {
             // Λογική εικονιδίων για αρχεία
             if (!fileModel.path.startsWith("ftp://") &&
-                extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp")) {
+                extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "mp4", "mkv", "mov")) {
 
-                Glide.with(holder.itemView.context)
+                Glide.with(holder.icon.context)
+                    .asBitmap()
                     .load(file)
-                    .override(120, 120) // ΠΟΛΥ ΣΗΜΑΝΤΙΚΟ: Διαβάζει την εικόνα σε μικρή ανάλυση
+                    // Το μυστικό: ObjectKey βασισμένο στο path ΚΑΙ την ημερομηνία τροποποίησης
+                    .signature(ObjectKey("${fileModel.path}_${file.lastModified()}"))
+                    .override(150, 150) // Λίγο μεγαλύτερο από πριν για ποιότητα, αλλά παραμένει γρήγορο
+                    .diskCacheStrategy(DiskCacheStrategy.ALL) // Αποθήκευση και του πρωτότυπου και του resized
                     .centerCrop()
-                    .thumbnail(0.1f)
-                    .dontAnimate() // Απενεργοποιεί τα εφέ που τρώνε CPU
-                    .diskCacheStrategy(DiskCacheStrategy.ALL)
                     .placeholder(R.drawable.ic_image_placeholder)
                     .into(holder.icon)
             } else {
