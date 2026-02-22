@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <style name="Theme.FTFileManager" parent="Theme.MaterialComponents.DayNight.NoActionBar">
 
-    <style name="Theme.FTFileManager" parent="android:Theme.Material.Light.NoActionBar" />
+        <item name="android:statusBarColor">#0F253C</item>
+
+        <item name="android:windowLightStatusBar">false</item>
+
+        <item name="android:navigationBarColor">#030A10</item>
+
+        <item name="colorPrimary">#0A1929</item>
+        <item name="colorPrimaryDark">#030A10</item>
+        <item name="colorAccent">#2196F3</item> <item name="android:windowBackground">#030A10</item>
+    </style>
 </resources>

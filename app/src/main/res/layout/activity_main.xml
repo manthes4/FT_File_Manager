@@ -3,6 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/drawerLayout"
     android:layout_width="match_parent"
+    android:background="#090C1D"
     android:layout_height="match_parent">
 
     <androidx.constraintlayout.widget.ConstraintLayout
@@ -13,7 +14,7 @@
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="#03A9F4"
+            android:background="#0252A6"
             app:title="FT File Manager"
             app:navigationIcon="@android:drawable/ic_menu_sort_by_size"
             app:titleTextColor="@android:color/white"
@@ -23,7 +24,7 @@
             android:id="@+id/recyclerView"
             android:layout_width="0dp"
             android:layout_height="0dp"
-            android:background="#232424"
+            android:background="#050923"
             app:layout_constraintBottom_toTopOf="@id/bottomBar"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
@@ -51,59 +52,65 @@
 
         <LinearLayout
             android:id="@+id/bottomBar"
-            android:layout_width="match_parent"
-            android:layout_height="60dp"
-            android:background="#212323"
-            android:elevation="8dp"
+            android:layout_width="0dp"
+            android:layout_height="64dp"
+            android:layout_marginStart="20dp"
+            android:layout_marginEnd="20dp"
+            android:layout_marginBottom="16dp"
+            android:background="@drawable/bg_bottom_bar"
+            android:elevation="12dp"
             android:gravity="center"
             android:orientation="horizontal"
-            app:layout_constraintBottom_toBottomOf="parent">
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent">
 
             <ImageButton
                 android:id="@+id/btnNewFolder"
                 android:layout_width="0dp"
-                android:layout_height="match_parent"
+                android:layout_height="48dp"
                 android:layout_weight="1"
-                android:background="?attr/selectableItemBackground"
+                android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@android:drawable/ic_input_add"
-                app:tint="#03A9F4" />
+                app:tint="#03C2FB" />
 
             <ImageButton
                 android:id="@+id/btnSort"
                 android:layout_width="0dp"
-                android:layout_height="match_parent"
+                android:layout_height="48dp"
                 android:layout_weight="1"
-                android:background="?attr/selectableItemBackground"
-                android:src="@android:drawable/ic_menu_sort_alphabetically"
-                app:tint="#03A9F4" />
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/sort_24px"
+                app:tint="#65F803" />
 
             <ImageButton
                 android:id="@+id/btnSearch"
                 android:layout_width="0dp"
-                android:layout_height="match_parent"
+                android:layout_height="48dp"
                 android:layout_weight="1"
-                android:background="?attr/selectableItemBackground"
-                android:src="@android:drawable/ic_menu_search"
-                app:tint="#03A9F4" />
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/search_24px"
+                app:tint="#03C2FB" />
 
             <ImageButton
                 android:id="@+id/btnSelectAll"
                 android:layout_width="0dp"
-                android:layout_height="match_parent"
+                android:layout_height="48dp"
                 android:layout_weight="1"
-                android:background="?attr/selectableItemBackground"
-                android:src="@android:drawable/checkbox_on_background"
-                app:tint="#03A9F4" />
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/select_all_24px"
+                app:tint="#FAE003" />
 
             <ImageButton
                 android:id="@+id/btnDashboard"
                 android:layout_width="0dp"
-                android:layout_height="match_parent"
+                android:layout_height="48dp"
                 android:layout_weight="1"
-                android:background="?attr/selectableItemBackground"
+                android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@drawable/home_24px"
-                app:tint="#03A9F4" />
-        </LinearLayout>
+                app:tint="#FAE003" /> </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 
@@ -113,7 +120,7 @@
         android:layout_height="match_parent"
         android:layout_gravity="start"
         app:headerLayout="@layout/nav_header"
-        android:background="#1A7BC8"
+        android:background="#163556"
         app:menu="@menu/drawer_menu" />
 
 </androidx.drawerlayout.widget.DrawerLayout>

@@ -12,5 +12,5 @@
         android:background="?attr/selectableItemBackgroundBorderless"
         android:src="@android:drawable/ic_menu_more"
         android:contentDescription="Επιλογές"
-        app:tint="#888888" />
+        app:tint="#FAF5F5" />
 </LinearLayout>

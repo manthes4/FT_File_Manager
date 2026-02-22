@@ -15,7 +15,7 @@
             android:id="@+id/dashboardToolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
-            android:background="#2196F3"
+            android:background="#0252A6"
             app:layout_constraintTop_toTopOf="parent"
             app:title="FT File Manager"
             app:titleTextColor="@android:color/white" />
@@ -36,7 +36,7 @@
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
         android:layout_gravity="start"
-        android:background="#1A7BC8"
+        android:background="#163556"
         app:headerLayout="@layout/nav_header"
         app:menu="@menu/drawer_menu" />
 

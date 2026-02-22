@@ -125,11 +125,11 @@ class NetworkClientActivity : AppCompatActivity() {
         val favoriteData = intent.getStringExtra("FAVORITE_SMB_DATA")
 
         if (!favoriteData.isNullOrEmpty()) {
-            // 1. ΠΡΟΤΕΡΑΙΟΤΗΤΑ: Αν υπάρχει το "FAVORITE_SMB_DATA", άσε την loadFavoriteIntoFields να τα κάνει όλα
-            // Αυτή η συνάρτηση ξέρει ήδη να ξεχωρίζει SFTP/SMB και να κάνει connect
+            showLoading() // Εμφάνισε το λευκό κάλυμμα αμέσως
             loadFavoriteIntoFields(favoriteData)
         }
         else if (targetPath.isNotEmpty()) {
+            showLoading() // Εμφάνισε το λευκό κάλυμμα
             // 2. BACKUP: Αν για κάποιο λόγο δεν υπάρχει το παραπάνω, έλεγξε το targetPath
             val isSftp = targetPath.startsWith("sftp://")
             val prefix = if (isSftp) "sftp://" else "smb://"
@@ -152,15 +152,25 @@ class NetworkClientActivity : AppCompatActivity() {
             findViewById<EditText>(R.id.etPass).setText(passExtra)
 
             if (isSftp) {
+                connectToSFTP(host, userExtra, passExtra, 22)
                 findViewById<RadioButton>(R.id.rbSftp).isChecked = true
                 findViewById<EditText>(R.id.etPort).setText("22")
                 if (userExtra.isNotEmpty()) connectToSFTP(host, userExtra, passExtra, 22)
             } else {
+                connectToSMB(host, userExtra, passExtra, 445)
                 findViewById<RadioButton>(R.id.rbSmb).isChecked = true
                 findViewById<EditText>(R.id.etPort).setText("445")
                 if (userExtra.isNotEmpty()) connectToSMB(host, userExtra, passExtra, 445)
             }
         }
+    }
+
+    private fun showLoading() {
+        findViewById<View>(R.id.loadingOverlay).visibility = View.VISIBLE
+    }
+
+    private fun hideLoading() {
+        findViewById<View>(R.id.loadingOverlay).visibility = View.GONE
     }
 
     private fun startNetworkScan(progressBar: ProgressBar) {
@@ -237,7 +247,7 @@ class NetworkClientActivity : AppCompatActivity() {
     }
 
     private fun connectToSFTP(host: String, user: String, pass: String, port: Int) {
-        // 1. Αποθήκευση τελευταίας σύνδεσης (όπως το είχαμε)
+        // Αποθήκευση τελευταίας σύνδεσης
         val prefs = getSharedPreferences("network_prefs", Context.MODE_PRIVATE)
         prefs.edit().apply {
             putString("sftp_last_host", host)
@@ -249,7 +259,7 @@ class NetworkClientActivity : AppCompatActivity() {
         }
 
         lifecycleScope.launch(Dispatchers.IO) {
-            val jsch = JSch()
+            val jsch = com.jcraft.jsch.JSch()
             try {
                 val session = jsch.getSession(user, host, port)
                 session.setPassword(pass)
@@ -257,18 +267,13 @@ class NetworkClientActivity : AppCompatActivity() {
                 config["StrictHostKeyChecking"] = "no"
                 session.setConfig(config)
 
-                // Δοκιμαστική σύνδεση
                 session.connect(10000)
-
-                // ΑΝ ΦΤΑΣΕΙ ΕΔΩ, ΣΗΜΑΙΝΕΙ ΟΤΙ ΤΑ ΣΤΟΙΧΕΙΑ ΕΙΝΑΙ ΣΩΣΤΑ
-                // Κλείνουμε ΑΜΕΣΩΣ τη δοκιμαστική σύνδεση για να ελευθερωθεί το slot στον server
                 session.disconnect()
 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@NetworkClientActivity, "SFTP OK! Μεταφορά...", Toast.LENGTH_SHORT).show()
-
+                    // Αν πετύχει, δεν χρειάζεται hideLoading γιατί φεύγουμε από την Activity
                     val intent = Intent(this@NetworkClientActivity, NetworkFileActivity::class.java).apply {
-                        putExtra("PROTOCOL", "SFTP") // ΠΡΟΣΟΧΗ: Αυτό το check πρέπει να υπάρχει στην NetworkFileActivity
+                        putExtra("PROTOCOL", "SFTP")
                         putExtra("HOST", host)
                         putExtra("USER", user)
                         putExtra("PASS", pass)
@@ -276,9 +281,12 @@ class NetworkClientActivity : AppCompatActivity() {
                         putExtra("START_PATH", ".")
                     }
                     startActivity(intent)
+                    finish() // Κλείνουμε την Activity σύνδεσης
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
+                    // ΕΔΩ ΕΙΝΑΙ ΤΟ ΚΛΕΙΔΙ: Αποτυχία -> Εμφάνισε πάλι το UI
+                    hideLoading()
                     Toast.makeText(this@NetworkClientActivity, "SFTP Error: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
@@ -322,19 +330,15 @@ class NetworkClientActivity : AppCompatActivity() {
                     }
 
                     if (connectedShare != null) {
-                        // --- ΕΔΩ ΕΙΝΑΙ Η ΠΡΟΣΘΗΚΗ ΓΙΑ ΤΗΝ ΑΠΟΘΗΚΕΥΣΗ ---
-                        // Μέσα στην connectToSMB, στην επιτυχία:
+                        // --- ΑΠΟΘΗΚΕΥΣΗ CREDENTIALS ---
                         val netPrefs = getSharedPreferences("network_settings", MODE_PRIVATE)
                         netPrefs.edit().apply {
-                            // Σώζουμε χρησιμοποιώντας ολόκληρο το path "smb://192.168.1.5"
                             putString("user_smb://$cleanHost", user)
                             putString("pass_smb://$cleanHost", pass)
-                            // Σώζουμε ΚΑΙ ως σκέτο path για σιγουριά (αν το realPath δεν έχει smb://)
                             putString("user_$cleanHost", user)
                             putString("pass_$cleanHost", pass)
                             apply()
                         }
-                        // ----------------------------------------------
 
                         withContext(Dispatchers.Main) {
                             val intent = Intent(this@NetworkClientActivity, NetworkFileActivity::class.java).apply {
@@ -345,9 +349,11 @@ class NetworkClientActivity : AppCompatActivity() {
                                 putExtra("PORT", port)
                             }
                             startActivity(intent)
+                            finish() // Κλείνει την οθόνη σύνδεσης αφού πέτυχε
                         }
                     } else {
                         withContext(Dispatchers.Main) {
+                            hideLoading() // <--- ΕΜΦΑΝΙΣΗ ΟΘΟΝΗΣ (Αποτυχία εύρεσης share)
                             Toast.makeText(this@NetworkClientActivity,
                                 "STATUS_BAD_NETWORK_NAME: Δεν βρέθηκε ο φάκελος Storage ή Videos",
                                 Toast.LENGTH_LONG).show()
@@ -356,6 +362,7 @@ class NetworkClientActivity : AppCompatActivity() {
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
+                    hideLoading() // <--- ΕΜΦΑΝΙΣΗ ΟΘΟΝΗΣ (Σφάλμα σύνδεσης)
                     Toast.makeText(this@NetworkClientActivity, "Σφάλμα: ${e.message}", Toast.LENGTH_LONG).show()
                     val progressBar = findViewById<ProgressBar>(R.id.scanProgress)
                     startNetworkScan(progressBar)
