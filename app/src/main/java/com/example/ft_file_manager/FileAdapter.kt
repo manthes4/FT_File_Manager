@@ -76,13 +76,18 @@ class FileAdapter(
             holder.icon.setImageResource(R.drawable.ic_folder_yellow)
             holder.itemView.removeCallbacks(null)
 
-            // ΑΝ ΕΧΟΥΜΕ ΗΔΗ ΤΙΜΗ (που δεν είναι "..." ή "--"), ΜΗΝ ΚΑΛΕΙΣ ΤΟΝ CALCULATOR ΞΑΝΑ
-            // Αυτό θα σταματήσει το άσκοπο "πήγαινε-έλα" στη βάση δεδομένων
-            if (fileModel.size != "..." && fileModel.size != "--" && fileModel.size.isNotEmpty()) {
-                holder.info.text = fileModel.size
-            } else {
+            // Πάρε το πότε άλλαξε ο φάκελος τελευταία φορά
+            val currentTimestamp = file.lastModified()
+
+            // Κάλεσε τον Calculator αν:
+            // 1. Δεν έχουμε τιμή
+            // 2. Ή αν ο φάκελος άλλαξε (το timestamp είναι διαφορετικό από αυτό που ξέραμε)
+            if (fileModel.size == "..." || fileModel.size == "--" || fileModel.size.isEmpty() || fileModel.lastModifiedCached != currentTimestamp) {
                 holder.info.text = "..."
+                fileModel.lastModifiedCached = currentTimestamp // Ενημέρωσε το cache στο model
                 FolderCalculator.calculateFolderSize(fileModel, holder.bindingAdapterPosition, this)
+            } else {
+                holder.info.text = fileModel.size
             }
 
         } else {
@@ -103,7 +108,6 @@ class FileAdapter(
                     .placeholder(R.drawable.ic_image_placeholder)
                     .into(holder.icon)
             } else {
-                // Στατικά εικονίδια για FTP ή μη-εικόνες
                 when (extension) {
                     "pdf" -> holder.icon.setImageResource(R.drawable.picture_as_pdf_24px)
                     "txt", "log" -> holder.icon.setImageResource(R.drawable.text_ad_24px)
@@ -111,30 +115,16 @@ class FileAdapter(
                     "mp4", "mkv", "avi" -> holder.icon.setImageResource(R.drawable.video_camera_back_24px)
                     "mp3", "wav" -> holder.icon.setImageResource(R.drawable.music_note_2_24px)
                     "apk" -> {
-                        if (!fileModel.path.startsWith("ftp://")) {
-                            try {
-                                val pm = holder.itemView.context.packageManager
-                                val info = pm.getPackageArchiveInfo(fileModel.path, 0)
-
-                                // Χρησιμοποιούμε ?.let για να εκτελεστεί ο κώδικας μόνο αν το info ΚΑΙ το applicationInfo ΔΕΝ είναι null
-                                info?.applicationInfo?.let { appInfo ->
-                                    appInfo.sourceDir = fileModel.path
-                                    appInfo.publicSourceDir = fileModel.path
-
-                                    val iconDrawable = appInfo.loadIcon(pm)
-                                    holder.icon.setImageDrawable(iconDrawable)
-                                } ?: run {
-                                    // Αν το info ή το applicationInfo είναι null, δείξε το default εικονίδιο
-                                    holder.icon.setImageResource(R.drawable.apk_document_24px)
-                                }
-                            } catch (e: Exception) {
-                                holder.icon.setImageResource(R.drawable.apk_document_24px)
-                            }
-                        } else {
-                            holder.icon.setImageResource(R.drawable.apk_document_24px)
-                        }
+                        // Χρήση Glide για τα APK!
+                        // Το Glide θα τρέξει τοPackageManager στο παρασκήνιο (background thread)
+                        // οπότε το scroll θα μείνει απόλυτα ομαλό.
+                        Glide.with(holder.icon.context)
+                            .load(fileModel.path)
+                            .placeholder(R.drawable.apk_document_24px)
+                            .error(R.drawable.apk_document_24px)
+                            .into(holder.icon)
                     }
-                    // Προεπιλεγμένο εικονίδιο για άγνωστα αρχεία
+
                     else -> holder.icon.setImageResource(R.drawable.apk_document_24px)
                 }
             }
