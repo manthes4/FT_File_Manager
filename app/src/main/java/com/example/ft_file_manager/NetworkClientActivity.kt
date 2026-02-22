@@ -215,39 +215,47 @@ class NetworkClientActivity : AppCompatActivity() {
         nsdManager.discoverServices("_smb._tcp", NsdManager.PROTOCOL_DNS_SD, discoveryListener)
     }
 
-    private fun connectToSFTP(host: String, user: String, pass: String, port: Int) { // Προσθήκη port εδώ
-
+    private fun connectToSFTP(host: String, user: String, pass: String, port: Int) {
+        // 1. Αποθήκευση τελευταίας σύνδεσης (όπως το είχαμε)
         val prefs = getSharedPreferences("network_prefs", Context.MODE_PRIVATE)
         prefs.edit().apply {
             putString("last_host", host.trim())
             putString("last_user", user)
             putString("last_pass", pass)
             putString("last_port", port.toString())
-            putBoolean("is_smb", false) // SFTP επιλογή
+            putBoolean("is_smb", false)
             apply()
         }
 
         lifecycleScope.launch(Dispatchers.IO) {
             val jsch = JSch()
             try {
-                val session = jsch.getSession(user, host, port) // Χρήση της θύρας εδώ
+                val session = jsch.getSession(user, host, port)
                 session.setPassword(pass)
-
                 val config = java.util.Properties()
                 config["StrictHostKeyChecking"] = "no"
                 session.setConfig(config)
 
+                // Δοκιμαστική σύνδεση
                 session.connect(10000)
-                val channel = session.openChannel("sftp") as ChannelSftp
-                channel.connect()
 
-                val files = channel.ls(".")
+                // ΑΝ ΦΤΑΣΕΙ ΕΔΩ, ΣΗΜΑΙΝΕΙ ΟΤΙ ΤΑ ΣΤΟΙΧΕΙΑ ΕΙΝΑΙ ΣΩΣΤΑ
+                // Κλείνουμε ΑΜΕΣΩΣ τη δοκιμαστική σύνδεση για να ελευθερωθεί το slot στον server
+                session.disconnect()
 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@NetworkClientActivity, "SFTP OK! Βρέθηκαν ${files.size} αρχεία", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@NetworkClientActivity, "SFTP OK! Μεταφορά...", Toast.LENGTH_SHORT).show()
+
+                    val intent = Intent(this@NetworkClientActivity, NetworkFileActivity::class.java).apply {
+                        putExtra("PROTOCOL", "SFTP") // ΠΡΟΣΟΧΗ: Αυτό το check πρέπει να υπάρχει στην NetworkFileActivity
+                        putExtra("HOST", host)
+                        putExtra("USER", user)
+                        putExtra("PASS", pass)
+                        putExtra("PORT", port)
+                        putExtra("START_PATH", ".")
+                    }
+                    startActivity(intent)
                 }
-                channel.disconnect()
-                session.disconnect()
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@NetworkClientActivity, "SFTP Error: ${e.message}", Toast.LENGTH_LONG).show()

@@ -29,6 +29,10 @@ class NetworkFileActivity : AppCompatActivity() {
     private lateinit var tvPath: TextView
     private lateinit var fileAdapter: FileAdapter
 
+    private var protocol = "SMB" // Default
+    private var sftpSession: com.jcraft.jsch.Session? = null
+    private var sftpChannel: com.jcraft.jsch.ChannelSftp? = null
+
     private val networkFiles = mutableListOf<FileModel>()
     private var smbFilesToMove = listOf<FileModel>()
 
@@ -54,6 +58,16 @@ class NetworkFileActivity : AppCompatActivity() {
         user = intent.getStringExtra("USER") ?: ""
         pass = intent.getStringExtra("PASS") ?: ""
 
+        // Μέσα στην onCreate, μετά τη λήψη των host, user, pass:
+        protocol = intent.getStringExtra("PROTOCOL") ?: "SMB"
+        currentPath = intent.getStringExtra("START_PATH") ?: "" // Για το SFTP ξεκινάμε με "."
+
+        if (protocol == "SFTP") {
+            supportActionBar?.title = "SFTP: $host"
+        } else {
+            supportActionBar?.title = "SMB: $host"
+        }
+
         // Μέσα στην onCreate
         // --- ΣΤΗΝ onCreate ---
         val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar)
@@ -61,7 +75,6 @@ class NetworkFileActivity : AppCompatActivity() {
 
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.setHomeAsUpIndicator(R.drawable.home_24px)
-        supportActionBar?.title = "SMB: $host"
 
 // Το NavigationClickListener μένει ως έχει για το Home
         toolbar.setNavigationOnClickListener {
@@ -150,16 +163,21 @@ class NetworkFileActivity : AppCompatActivity() {
                     if (!networkFiles.any { it.isSelected }) {
                         android.util.Log.d("SMB_DEBUG", "All items deselected. Navigation restored.")
                     }
+                    // Μέσα στο onItemClick, εκεί που λέει "Κανονική πλοήγηση"
                 } else {
-                    // Κανονική πλοήγηση
                     if (fileModel.isDirectory) {
-                        android.util.Log.d("SMB_DEBUG", "Navigating into: ${fileModel.name}")
-                        if (currentPath.isEmpty()) {
-                            shareName = fileModel.name
-                            currentPath = "/"
+                        if (protocol == "SFTP") {
+                            // Λογική πλοήγησης SFTP
+                            currentPath = fileModel.path
                         } else {
-                            val base = if (currentPath.endsWith("/")) currentPath else "$currentPath/"
-                            currentPath = base + fileModel.name
+                            // Λογική πλοήγησης SMB (CoreELEC)
+                            if (currentPath.isEmpty()) {
+                                shareName = fileModel.name
+                                currentPath = "/"
+                            } else {
+                                val base = if (currentPath.endsWith("/")) currentPath else "$currentPath/"
+                                currentPath = base + fileModel.name
+                            }
                         }
                         loadNetworkFiles()
                     }
@@ -219,6 +237,15 @@ class NetworkFileActivity : AppCompatActivity() {
     }
 
     private fun loadNetworkFiles() {
+        // Εδώ ελέγχουμε τι είδους σύνδεση έχουμε
+        if (protocol == "SFTP") {
+            loadSFTPFiles() // Αυτή τη συνάρτηση θα την προσθέσεις τώρα
+        } else {
+            loadSMBFiles()  // Αυτή είναι η δική σου (που μόλις μετονόμασες)
+        }
+    }
+
+    private fun loadSMBFiles() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 if (smbContext == null) {
@@ -265,6 +292,53 @@ class NetworkFileActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@NetworkFileActivity, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun loadSFTPFiles() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // Αν δεν έχουμε ανοιχτή σύνδεση, τη δημιουργούμε
+                if (sftpChannel == null || !sftpChannel!!.isConnected) {
+                    val jsch = com.jcraft.jsch.JSch()
+                    val session = jsch.getSession(user, host, intent.getIntExtra("PORT", 22))
+                    session.setPassword(pass)
+                    session.setConfig("StrictHostKeyChecking", "no")
+                    session.connect(15000)
+                    sftpSession = session
+                    sftpChannel = session.openChannel("sftp") as com.jcraft.jsch.ChannelSftp
+                    sftpChannel!!.connect()
+                }
+
+                // Στο SFTP το αρχικό path είναι συνήθως το "."
+                val path = if (currentPath.isEmpty() || currentPath == "/") "." else currentPath
+                val vector = sftpChannel!!.ls(path)
+
+                val newList = mutableListOf<FileModel>()
+                for (entry in vector) {
+                    val file = entry as com.jcraft.jsch.ChannelSftp.LsEntry
+                    if (file.filename == "." || file.filename == "..") continue
+
+                    newList.add(FileModel(
+                        name = file.filename,
+                        path = if (path == ".") file.filename else "$path/${file.filename}",
+                        isDirectory = file.attrs.isDir,
+                        size = if (file.attrs.isDir) "Φάκελος" else "${file.attrs.size / 1024} KB",
+                        isSelected = false
+                    ))
+                }
+
+                withContext(Dispatchers.Main) {
+                    networkFiles.clear()
+                    networkFiles.addAll(newList)
+                    fileAdapter.notifyDataSetChanged()
+                    tvPath.text = "SFTP: $path"
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@NetworkFileActivity, "SFTP Error: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -421,6 +495,14 @@ class NetworkFileActivity : AppCompatActivity() {
     private fun showError(msg: String?) {
         lifecycleScope.launch(Dispatchers.Main) {
             Toast.makeText(this@NetworkFileActivity, "Error: $msg", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        lifecycleScope.launch(Dispatchers.IO) {
+            sftpChannel?.disconnect()
+            sftpSession?.disconnect()
         }
     }
 }
