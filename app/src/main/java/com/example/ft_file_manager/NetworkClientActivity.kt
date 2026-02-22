@@ -48,6 +48,15 @@ class NetworkClientActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("network_prefs", Context.MODE_PRIVATE)
         findViewById<EditText>(R.id.etHost).setText(prefs.getString("last_host", ""))
         findViewById<EditText>(R.id.etUser).setText(prefs.getString("last_user", ""))
+        findViewById<EditText>(R.id.etPass).setText(prefs.getString("last_pass", ""))
+        findViewById<EditText>(R.id.etPort).setText(prefs.getString("last_port", "445"))
+
+        val isLastSmb = prefs.getBoolean("is_smb", true)
+        if (isLastSmb) {
+            findViewById<RadioButton>(R.id.rbSmb).isChecked = true
+        } else {
+            findViewById<RadioButton>(R.id.rbSftp).isChecked = true
+        }
 // ... και ούτω καθεξής
 
         btnScan.setOnClickListener {
@@ -207,6 +216,17 @@ class NetworkClientActivity : AppCompatActivity() {
     }
 
     private fun connectToSFTP(host: String, user: String, pass: String, port: Int) { // Προσθήκη port εδώ
+
+        val prefs = getSharedPreferences("network_prefs", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putString("last_host", host.trim())
+            putString("last_user", user)
+            putString("last_pass", pass)
+            putString("last_port", port.toString())
+            putBoolean("is_smb", false) // SFTP επιλογή
+            apply()
+        }
+
         lifecycleScope.launch(Dispatchers.IO) {
             val jsch = JSch()
             try {
@@ -238,6 +258,17 @@ class NetworkClientActivity : AppCompatActivity() {
 
     private fun connectToSMB(host: String, user: String, pass: String, port: Int) {
         val cleanHost = host.trim()
+
+        // --- ΑΠΟΘΗΚΕΥΣΗ ΤΕΛΕΥΤΑΙΑΣ ΣΥΝΔΕΣΗΣ ΓΙΑ ΤΟ UI ---
+        val prefs = getSharedPreferences("network_prefs", Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            putString("last_host", cleanHost)
+            putString("last_user", user)
+            putString("last_pass", pass)
+            putString("last_port", port.toString())
+            putBoolean("is_smb", true) // Για να ξέρουμε να επιλέξουμε το RadioButton
+            apply()
+        }
 
         lifecycleScope.launch(Dispatchers.IO) {
             val client = SMBClient()
