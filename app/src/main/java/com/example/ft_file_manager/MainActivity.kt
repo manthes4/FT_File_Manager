@@ -6,10 +6,12 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.util.Log
+import android.view.LayoutInflater
 import android.view.MenuItem
 import android.view.View
 import android.widget.ImageButton
 import android.view.Menu
+import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
@@ -31,6 +33,7 @@ import androidx.lifecycle.lifecycleScope
 import com.bumptech.glide.Glide
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.signature.ObjectKey
+import com.example.ft_file_manager.FileAdapter.FileViewHolder
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -49,6 +52,8 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        com.bumptech.glide.Glide.get(this).setMemoryCategory(com.bumptech.glide.MemoryCategory.HIGH)
 
         // Μέσα στο onCreate
         val prefs = getSharedPreferences("favorites", MODE_PRIVATE)
