@@ -93,19 +93,23 @@ class FileAdapter(
         } else {
             // Λογική εικονιδίων για αρχεία
             // Μέσα στην onBindViewHolder του FileAdapter.kt
+            // Λογική εικονιδίων για εικόνες/βίντεο
             if (!fileModel.path.startsWith("ftp://") &&
-                extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "mp4", "mkv", "mov")
-            ) {
+                extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "mp4", "mkv", "mov")) {
+
                 Glide.with(holder.icon.context)
-                    .asBitmap() // Πολύ πιο γρήγορο από το να φορτώνει ολόκληρο το drawable
+                    .asBitmap()
                     .load(fileModel.path)
-                    // Χρήση ΜΟΝΟ του cache key. ΠΟΤΕ file.lastModified() εδώ!
                     .signature(ObjectKey(fileModel.path + fileModel.lastModifiedCached))
-                    .format(com.bumptech.glide.load.DecodeFormat.PREFER_RGB_565) // 50% λιγότερη RAM
-                    .override(100, 100) // Thumbnail size
-                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE) // Αποθήκευση μόνο του μικρού αρχείου
-                    .thumbnail(0.1f) // Φόρτωσε ακαριαία μια θολή εικόνα
+                    // 2. ΑΥΤΟ ΕΙΝΑΙ ΤΟ ΚΛΕΙΔΙ: Αποθήκευσε το αποτέλεσμα (το μικρό thumbnail)
+                    // έτσι ώστε να μην ξαναδιαβάσει ποτέ το μεγάλο αρχείο.
+                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
+
+                    .override(120, 120) // Σταθερό μέγεθος για να "κουμπώνει" στο cache
+                    .centerCrop()
+                    .transition(com.bumptech.glide.load.resource.bitmap.BitmapTransitionOptions.withCrossFade(150))
                     .placeholder(R.drawable.ic_image_placeholder)
+                    .thumbnail(0.1f) // Φορτώνει πρώτα το 10% της ανάλυσης
                     .into(holder.icon)
             } else {
                 when (extension) {

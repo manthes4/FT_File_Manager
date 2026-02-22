@@ -31,6 +31,7 @@ import java.util.Collections
 import kotlin.jvm.java
 import androidx.lifecycle.lifecycleScope
 import com.bumptech.glide.Glide
+import com.bumptech.glide.RequestBuilder
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.signature.ObjectKey
 import com.jcraft.jsch.JSch
@@ -95,27 +96,27 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            override fun getPreloadRequestBuilder(item: FileModel): com.bumptech.glide.RequestBuilder<*> {
+            override fun getPreloadRequestBuilder(item: FileModel): RequestBuilder<*> {
+                // ΕΔΩ ΠΡΕΠΕΙ ΝΑ ΕΙΝΑΙ ΑΚΡΙΒΩΣ ΟΙ ΙΔΙΕΣ ΡΥΘΜΙΣΕΙΣ ΜΕ ΤΟΝ ADAPTER
                 return Glide.with(this@MainActivity)
                     .asBitmap()
-                    .load(File(item.path))
-                    // Αφαίρεσε το File(item.path).lastModified()
-                    .signature(ObjectKey(item.path))
-                    .override(150, 150)
-                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE) // Αποθήκευσε μόνο το thumbnail
+                    .load(item.path)
+                    .signature(ObjectKey(item.path + item.lastModifiedCached))
+                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE) // Αποθηκεύει μόνο το τελικό thumbnail των 120x120
+                    .override(120, 120)
                     .centerCrop()
             }
         }
 
 // 3. Σύνδεση του Preloader με το RecyclerView (Προ-φορτώνουμε 30 στοιχεία μπροστά!)
         val preloader = com.bumptech.glide.integration.recyclerview.RecyclerViewPreloader<FileModel>(
-            Glide.with(this), modelProvider, sizeProvider, 30
+            Glide.with(this), modelProvider, sizeProvider, 50
         )
         // Στην onCreate της MainActivity.kt:
         binding.recyclerView.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             setHasFixedSize(true) // Βοηθάει πολύ στην ταχύτητα
-            setItemViewCacheSize(20) // Κρατάει 20 στοιχεία έτοιμα στη μνήμη
+            setItemViewCacheSize(15) // Κρατάει 20 στοιχεία έτοιμα στη μνήμη
         }
 
         // 2. ΕΔΩ ΜΠΑΙΝΕΙ Ο SCROLL LISTENER
