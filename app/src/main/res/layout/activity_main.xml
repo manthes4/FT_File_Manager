@@ -78,6 +78,15 @@
                 app:tint="#03A9F4" />
 
             <ImageButton
+                android:id="@+id/btnSearch"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="?attr/selectableItemBackground"
+                android:src="@android:drawable/ic_menu_search"
+                app:tint="#03A9F4" />
+
+            <ImageButton
                 android:id="@+id/btnSelectAll"
                 android:layout_width="0dp"
                 android:layout_height="match_parent"

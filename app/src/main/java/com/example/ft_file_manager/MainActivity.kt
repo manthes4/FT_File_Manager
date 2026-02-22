@@ -10,6 +10,7 @@ import android.view.MenuItem
 import android.view.View
 import android.widget.ImageButton
 import android.view.Menu
+import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
@@ -257,6 +258,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnSort.setOnClickListener { showSortDialog() }
+
+        // Μέσα στο onCreate, μετά το binding.btnSort.setOnClickListener
+        binding.btnSearch.setOnClickListener {
+            showSearchDialog()
+        }
 
         // Λήψη του μονοπατιού από το Dashboard
         val startPathStr = intent.getStringExtra("START_PATH")
@@ -522,6 +528,55 @@ class MainActivity : AppCompatActivity() {
 
         dialog.setContentView(view)
         dialog.show()
+    }
+
+    private fun showSearchDialog() {
+        val input = EditText(this)
+        input.hint = "Αναζήτηση παντού..."
+
+        AlertDialog.Builder(this)
+            .setTitle("Βαθιά Αναζήτηση")
+            .setView(input)
+            .setPositiveButton("Αναζήτηση") { _, _ ->
+                val query = input.text.toString().trim()
+                if (query.isNotEmpty()) {
+                    performDeepSearch(query)
+                }
+            }
+            .setNegativeButton("Άκυρο", null)
+            .show()
+    }
+
+    private fun performDeepSearch(query: String) {
+        binding.progressBar.visibility = View.VISIBLE
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            // Η εντολή 'find' ψάχνει αναδρομικά σε όλους τους υποφακέλους
+            // Το -iname κάνει την αναζήτηση case-insensitive (αγνοεί κεφαλαία/μικρά)
+            val cmd = "find \"${currentPath.absolutePath}\" -iname \"*$query*\" -maxdepth 3"
+            val output = RootTools.getOutput(cmd)
+
+            val searchResults = mutableListOf<FileModel>()
+            output.split("\n").forEach { path ->
+                val file = File(path.trim())
+                if (file.exists()) {
+                    searchResults.add(FileModel(
+                        file.name,
+                        file.absolutePath,
+                        file.isDirectory,
+                        if (file.isDirectory) "--" else FolderCalculator.formatSize(file.length()),
+                        false
+                    ))
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                binding.progressBar.visibility = View.GONE
+                val adapter = binding.recyclerView.adapter as? FileAdapter
+                adapter?.updateList(searchResults)
+                binding.toolbar.title = "Αποτελέσματα: ${searchResults.size}"
+            }
+        }
     }
 
     private fun pasteFile() {

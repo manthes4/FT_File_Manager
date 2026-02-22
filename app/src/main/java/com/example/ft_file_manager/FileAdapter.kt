@@ -14,7 +14,7 @@ import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.signature.ObjectKey
 
 class FileAdapter(
-    private val files: List<FileModel>,
+    private var files: List<FileModel>,
     var isInSelectionMode: Boolean = false, // Μεταβλητή ελέγχου για το mode επιλογής
     private val onItemClick: (FileModel) -> Unit,
     private val onItemLongClick: (FileModel) -> Unit,
@@ -25,6 +25,12 @@ class FileAdapter(
         val icon: ImageView = view.findViewById(R.id.imgIcon)
         val name: TextView = view.findViewById(R.id.tvFileName)
         val info: TextView = view.findViewById(R.id.tvFileInfo)
+    }
+
+    // Η συνάρτηση για την αναζήτηση πλέον θα δουλεύει κανονικά!
+    fun updateList(newList: List<FileModel>) {
+        this.files = newList
+        notifyDataSetChanged()
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FileViewHolder {
