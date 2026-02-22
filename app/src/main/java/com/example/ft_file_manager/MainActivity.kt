@@ -27,6 +27,7 @@ import kotlinx.coroutines.*
 import java.util.Collections
 import kotlin.jvm.java
 import androidx.lifecycle.lifecycleScope
+import com.bumptech.glide.Glide
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -36,7 +37,7 @@ class MainActivity : AppCompatActivity() {
     private var isCutOperation: Boolean = false
     private var isSelectionMode = false // Αυτή η γραμμή έλειπε!
     private var bulkFilesToMove = listOf<FileModel>() // Νέα μεταβλητή στην κορυφή της κλάσης!
-    private val sizeCache = mutableMapOf<String, String>()
+    private val sizeCache = mutableMapOf<String, CharSequence>()
 
     // Αντί για MutableSet, χρησιμοποιούμε MutableList για να έχουμε σειρά (index)
     private var favoritePaths = mutableListOf<String>()
@@ -63,7 +64,27 @@ class MainActivity : AppCompatActivity() {
         }
         updateDrawerMenu()
 
-        binding.recyclerView.layoutManager = LinearLayoutManager(this)
+        // 1. Ρυθμίσεις απόδοσης που βάλαμε πριν
+        binding.recyclerView.apply {
+            layoutManager = LinearLayoutManager(this@MainActivity)
+            setHasFixedSize(true)
+            setItemViewCacheSize(30)
+        }
+
+        // 2. ΕΔΩ ΜΠΑΙΝΕΙ Ο SCROLL LISTENER
+        binding.recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                super.onScrollStateChanged(recyclerView, newState)
+
+                if (newState == RecyclerView.SCROLL_STATE_DRAGGING || newState == RecyclerView.SCROLL_STATE_SETTLING) {
+                    // Σταματάει το Glide όσο σκρολάρεις για να μη λαγκάρει η SD card
+                    Glide.with(this@MainActivity).pauseRequests()
+                } else if (newState == RecyclerView.SCROLL_STATE_IDLE) {
+                    // Ξεκινάει πάλι το Glide μόλις σταματήσει τελείως το scroll
+                    Glide.with(this@MainActivity).resumeRequests()
+                }
+            }
+        })
 
         // 1. Toolbar Navigation (Drawer)
         binding.toolbar.setNavigationOnClickListener {
@@ -273,7 +294,7 @@ class MainActivity : AppCompatActivity() {
         binding.toolbar.title = displayTitle
 
         // Καθαρισμός cache
-        sizeCache.remove(directory.absolutePath)
+       // sizeCache.remove(directory.absolutePath)
 
         MainScope().launch {
             val fileList = mutableListOf<FileModel>()
@@ -342,13 +363,11 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (success) {
-                // 1. Αφαιρούμε το αρχείο από το Cache
-                sizeCache.remove(fileModel.path)
-                // 2. Αφαιρούμε τον πατέρα του από το Cache για να ενημερωθεί το "99 αρχεία"
-                sizeCache.remove(currentPath.absolutePath)
+                sizeCache.remove(fileModel.path) // Αφαιρεί το αρχείο
+                sizeCache.remove(currentPath.absolutePath) // Αφαιρεί τον φάκελο για να ξαναμετρηθεί!
 
                 Toast.makeText(this@MainActivity, "Διαγράφηκε", Toast.LENGTH_SHORT).show()
-                loadFiles(currentPath) // Φρεσκάρισμα λίστας
+                loadFiles(currentPath)
             } else {
                 Toast.makeText(this@MainActivity, "Αποτυχία διαγραφής", Toast.LENGTH_SHORT).show()
             }
@@ -643,7 +662,7 @@ class MainActivity : AppCompatActivity() {
                     if (isSystem) RootTools.lockSystem()
 
                     if (success) {
-                        loadFiles(currentPath)
+                        sizeCache.remove(currentPath.absolutePath)
                         Toast.makeText(this@MainActivity, "Διαγράφηκε", Toast.LENGTH_SHORT).show()
                     } else {
                         Toast.makeText(this@MainActivity, "Αποτυχία διαγραφής", Toast.LENGTH_SHORT)

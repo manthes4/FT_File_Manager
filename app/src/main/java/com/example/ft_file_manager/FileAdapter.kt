@@ -55,8 +55,16 @@ class FileAdapter(
 
         if (fileModel.isDirectory) {
             holder.icon.setImageResource(R.drawable.ic_folder_yellow)
-            // Κλήση του Helper για ασύγχρονο υπολογισμό
-            FolderCalculator.calculateFolderSize(fileModel, position, this)
+
+            // 1. Ακυρώνουμε τυχόν προηγούμενο αίτημα για να μην μπερδευτεί το scroll
+            holder.itemView.handler?.removeCallbacksAndMessages(null)
+
+            // 2. Ξεκινάει τον υπολογισμό μόνο αν το item μείνει σταθερό για 100ms
+            // Αν ο χρήστης σκρολάρει γρήγορα, το postDelayed θα ακυρώνεται συνεχώς
+            holder.itemView.postDelayed({
+                FolderCalculator.calculateFolderSize(fileModel, position, this)
+            }, 100)
+
         } else {
             // Λογική εικονιδίων για αρχεία
             if (!fileModel.path.startsWith("ftp://") &&
@@ -64,9 +72,11 @@ class FileAdapter(
 
                 Glide.with(holder.itemView.context)
                     .load(file)
+                    .override(120, 120) // ΠΟΛΥ ΣΗΜΑΝΤΙΚΟ: Διαβάζει την εικόνα σε μικρή ανάλυση
                     .centerCrop()
-                    .thumbnail(0.1f) // Φορτώνει γρήγορα μια μικρογραφία
-                    .diskCacheStrategy(DiskCacheStrategy.ALL) // Cache για να μην κολλάει στο scroll
+                    .thumbnail(0.1f)
+                    .dontAnimate() // Απενεργοποιεί τα εφέ που τρώνε CPU
+                    .diskCacheStrategy(DiskCacheStrategy.ALL)
                     .placeholder(R.drawable.ic_image_placeholder)
                     .into(holder.icon)
             } else {
@@ -122,6 +132,14 @@ class FileAdapter(
             onItemClick(fileModel)
         }
     } // Εδώ κλείνει η onBindViewHolder
+
+    override fun onViewRecycled(holder: FileViewHolder) {
+        super.onViewRecycled(holder)
+        // Ακυρώνει το delay αν το item βγήκε από την οθόνη πριν περάσουν τα 100ms
+        holder.itemView.removeCallbacks(null)
+        // Σταματάει το Glide για το συγκεκριμένο view
+        Glide.with(holder.itemView.context).clear(holder.icon)
+    }
 
     override fun getItemCount() = files.size
 }

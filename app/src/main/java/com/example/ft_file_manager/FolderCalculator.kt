@@ -14,7 +14,7 @@ import kotlin.math.pow
 
 object FolderCalculator {
 
-    private val executor = Executors.newFixedThreadPool(4)
+    private val executor = Executors.newFixedThreadPool(2)
     private val mainHandler = Handler(Looper.getMainLooper())
 
     data class FolderResult(val size: Long, val fileCount: Int, val folderCount: Int)
