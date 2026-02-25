@@ -318,29 +318,30 @@ class DashboardActivity : AppCompatActivity() {
             )
         ) // Χρησιμοποίησε ένα εικονίδιο δικτύου αν έχεις
 
-        // --- 2. Pinned Φακέλων (ID 5) ---
-        val prefsDash = getSharedPreferences("dashboard_pins", MODE_PRIVATE)
-        var savedPins = prefsDash.getString("paths", "") ?: ""
+// --- 2. Pinned Φακέλων (ID 5) ---
+// Διαβάζουμε απευθείας από τα "favorites" (την ίδια πηγή με το Drawer)
+        val prefsFav = getSharedPreferences("favorites", MODE_PRIVATE)
+        val savedFavs = prefsFav.getString("paths_ordered", "") ?: ""
 
-        if (savedPins.isEmpty()) {
-            val prefsFav = getSharedPreferences("favorites", MODE_PRIVATE)
-            savedPins = prefsFav.getString("paths_ordered", "") ?: ""
-            prefsDash.edit().putString("paths", savedPins).apply()
-        }
-
-        if (savedPins.isNotEmpty()) {
-            savedPins.split("|").forEach { entry ->
+        if (savedFavs.isNotEmpty()) {
+            savedFavs.split("|").forEach { entry ->
                 val parts = entry.split("*")
                 if (parts.size == 2) {
-                    val path = parts[1]
-                    // Προσθήκη αν είναι τοπικό αρχείο που υπάρχει ή αν είναι δικτυακό (smb/ftp)
-                    if (path.startsWith("smb://") || path.startsWith("ftp://") || path.startsWith("sftp://") || File(path).exists()) {
-                        // Επιλογή εικονιδίου ανάλογα με το αν είναι δίκτυο ή τοπικό
+                    val nameOfFavorite = parts[0]
+                    val pathOfFavorite = parts[1]
+
+                    // Έλεγχος αν το αρχείο υπάρχει ή αν είναι δίκτυο
+                    if (pathOfFavorite.startsWith("smb://") || pathOfFavorite.startsWith("ftp://") ||
+                        pathOfFavorite.startsWith("sftp://") || File(pathOfFavorite).exists()) {
+
                         val icon = when {
-                            path.startsWith("smb://") || path.startsWith("sftp://") -> R.drawable.ic_root // Εικονίδιο δικτύου
-                            path.startsWith("ftp://") -> android.R.drawable.ic_menu_share
+                            pathOfFavorite.startsWith("smb://") || pathOfFavorite.startsWith("sftp://") -> R.drawable.ic_root
+                            pathOfFavorite.startsWith("ftp://") -> android.R.drawable.ic_menu_share
                             else -> R.drawable.ic_folder_yellow
                         }
+
+                        // Προσθήκη στη λίστα
+                        storageItems.add(DashboardItem(5, nameOfFavorite, pathOfFavorite, icon))
                     }
                 }
             }
