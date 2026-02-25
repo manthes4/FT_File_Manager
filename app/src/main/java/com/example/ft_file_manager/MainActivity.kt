@@ -269,7 +269,17 @@ class MainActivity : AppCompatActivity() {
             finish() // Κλείνει την MainActivity και επιστρέφει στην προηγούμενη (Dashboard)
         }
 
-        binding.fabPaste.setOnClickListener { pasteFile() }
+        // Κουμπί Επιβεβαίωσης Επικόλλησης
+        binding.btnConfirmPaste.setOnClickListener {
+            pasteFile()
+        }
+
+// Κουμπί Ακύρωσης
+        binding.btnCancelPaste.setOnClickListener {
+            cleanupAfterPaste() // Χρησιμοποιούμε τη συνάρτηση καθαρισμού που φτιάξαμε
+            Toast.makeText(this, "Η επικόλληση ακυρώθηκε", Toast.LENGTH_SHORT).show()
+        }
+
         binding.btnNewFolder.setOnClickListener { view ->
             val popup = androidx.appcompat.widget.PopupMenu(this, view)
             popup.menu.add("Νέος Φάκελος")
@@ -310,19 +320,31 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Αυτό εκτελείται κάθε φορά που επιστρέφεις στην εφαρμογή
+        // Φόρτωση ρυθμίσεων και ενημέρωση μενού
         loadFavoritesFromPrefs()
         updateDrawerMenu()
 
-        // --- Η ΠΡΟΣΘΗΚΗ ΕΔΩ ---
-        // Αν υπάρχουν αρχεία στον TransferManager (π.χ. από το CoreELEC)
-        // εμφάνισε το κουμπί Paste της MainActivity
+        // --- Η ΝΕΑ ΛΟΓΙΚΗ ΓΙΑ ΤΟ CONTAINER ---
         if (TransferManager.filesToMove.isNotEmpty()) {
-            binding.fabPaste.show()
+            // Εμφανίζουμε όλο το ημιδιαφανές πλαίσιο με τα δύο κουμπιά
+            binding.pasteContainer.visibility = View.VISIBLE
+            Log.d("TRANSFER_DEBUG", "Files found in Manager, showing Paste UI")
         } else {
-            // Αν είναι άδειο, κρύψτο (προαιρετικά)
-            binding.fabPaste.hide()
+            // Αν δεν υπάρχει τίποτα για επικόλληση, το κρύβουμε
+            binding.pasteContainer.visibility = View.GONE
         }
+    }
+
+    private fun cleanupAfterPaste() {
+        TransferManager.filesToMove = emptyList()
+        TransferManager.sourceIsSmb = false
+        TransferManager.sourceIsSftp = false
+        TransferManager.isCut = false
+        fileToMove = null
+        bulkFilesToMove = emptyList()
+
+        // Κρύβουμε όλο το πλαίσιο
+        binding.pasteContainer.visibility = View.GONE
     }
 
     private fun checkPermissions() {
@@ -729,24 +751,38 @@ class MainActivity : AppCompatActivity() {
 
     // Βοηθητική συνάρτηση για καθαρισμό
     private fun cleanupTransfer() {
+        Log.d("TRANSFER_DEBUG", "Cleaning up TransferManager and hiding UI")
+
+        // 1. Καθαρισμός δεδομένων στον Singleton Manager
         TransferManager.filesToMove = emptyList()
         TransferManager.sourceIsSmb = false
         TransferManager.sourceIsSftp = false
         TransferManager.isCut = false
+
+        // 2. Καθαρισμός τοπικών μεταβλητών της MainActivity
         fileToMove = null
         bulkFilesToMove = emptyList()
-        binding.fabPaste.hide()
+
+        // 3. ΕΝΗΜΕΡΩΣΗ UI: Κρύβουμε όλο το πλαίσιο (Container) αντί για το FAB
+        binding.pasteContainer.visibility = View.GONE
+
+        // Αν έχεις κρατήσει και το παλιό fabPaste για ασφάλεια:
+        // binding.fabPaste.hide()
     }
 
     private fun executeNetworkDownload() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                withContext(Dispatchers.Main) { binding.progressBar.visibility = View.VISIBLE }
+                Log.d("TRANSFER_DEBUG", "Starting Network Download...")
+                withContext(Dispatchers.Main) {
+                    binding.progressBar.visibility = View.VISIBLE
+                }
 
                 val targetDir = currentPath
                 val isCut = TransferManager.isCut
 
                 TransferManager.filesToMove.forEach { model ->
+                    Log.d("TRANSFER_DEBUG", "Downloading: ${model.name} from ${model.path}")
                     val localDest = File(targetDir, model.name)
 
                     if (TransferManager.sourceIsSftp) {
@@ -792,16 +828,13 @@ class MainActivity : AppCompatActivity() {
                     binding.progressBar.visibility = View.GONE
                     loadFiles(currentPath)
 
-                    // ΚΑΘΑΡΙΣΜΟΣ FLAGS
-                    TransferManager.filesToMove = emptyList()
-                    TransferManager.sourceIsSmb = false
-                    TransferManager.sourceIsSftp = false
-                    TransferManager.isCut = false
+                    // --- ΧΡΗΣΗ ΤΗΣ ΚΕΝΤΡΙΚΗΣ ΣΥΝΑΡΤΗΣΗΣ ΚΑΘΑΡΙΣΜΟΥ ---
+                    cleanupTransfer()
 
-                    binding.fabPaste.hide()
                     Toast.makeText(this@MainActivity, "Η λήψη ολοκληρώθηκε!", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
+                Log.e("TRANSFER_DEBUG", "Network Download Error: ${e.message}")
                 withContext(Dispatchers.Main) {
                     binding.progressBar.visibility = View.GONE
                     Toast.makeText(this@MainActivity, "Σφάλμα: ${e.message}", Toast.LENGTH_LONG).show()
