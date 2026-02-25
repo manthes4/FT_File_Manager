@@ -119,14 +119,7 @@ class FileAdapter(
                     "mp4", "mkv", "avi" -> holder.icon.setImageResource(R.drawable.video_camera_back_24px)
                     "mp3", "wav" -> holder.icon.setImageResource(R.drawable.music_note_2_24px)
                     "apk" -> {
-                        // Χρήση Glide για τα APK!
-                        // Το Glide θα τρέξει τοPackageManager στο παρασκήνιο (background thread)
-                        // οπότε το scroll θα μείνει απόλυτα ομαλό.
-                        Glide.with(holder.icon.context)
-                            .load(fileModel.path)
-                            .placeholder(R.drawable.apk_document_24px)
-                            .error(R.drawable.apk_document_24px)
-                            .into(holder.icon)
+                        ApkIconLoader.load(holder.icon.context, fileModel.path, holder.icon)
                     }
 
                     else -> holder.icon.setImageResource(R.drawable.apk_document_24px)

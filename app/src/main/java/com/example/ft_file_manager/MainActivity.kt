@@ -49,7 +49,7 @@ class MainActivity : AppCompatActivity() {
     private val sizeCache = mutableMapOf<String, CharSequence>()
     private lateinit var adapter: FileAdapter
 
-    private var protocol = "SMB"
+    private var protocol = "LOCAL" // Καλή πρακτική: ξεκινάμε πάντα ως Local
     private var host = ""
     private var user = ""
     private var pass = ""
@@ -85,33 +85,35 @@ class MainActivity : AppCompatActivity() {
         val sizeProvider = com.bumptech.glide.util.FixedPreloadSizeProvider<FileModel>(150, 150)
 
 // 2. Ορίζουμε ποια αρχεία θα προ-φορτώνονται (μόνο εικόνες/βίντεο)
-        val modelProvider = object : com.bumptech.glide.ListPreloader.PreloadModelProvider<FileModel> {
-            override fun getPreloadItems(position: Int): List<FileModel> {
-                val item = fullFileList.getOrNull(position)
-                // Προ-φορτώνουμε μόνο αν είναι αρχείο και όχι φάκελος
-                return if (item != null && !item.isDirectory && isImageOrVideo(item.path)) {
-                    listOf(item)
-                } else {
-                    emptyList()
+        val modelProvider =
+            object : com.bumptech.glide.ListPreloader.PreloadModelProvider<FileModel> {
+                override fun getPreloadItems(position: Int): List<FileModel> {
+                    val item = fullFileList.getOrNull(position)
+                    // Προ-φορτώνουμε μόνο αν είναι αρχείο και όχι φάκελος
+                    return if (item != null && !item.isDirectory && isImageOrVideo(item.path)) {
+                        listOf(item)
+                    } else {
+                        emptyList()
+                    }
+                }
+
+                override fun getPreloadRequestBuilder(item: FileModel): RequestBuilder<*> {
+                    // ΕΔΩ ΠΡΕΠΕΙ ΝΑ ΕΙΝΑΙ ΑΚΡΙΒΩΣ ΟΙ ΙΔΙΕΣ ΡΥΘΜΙΣΕΙΣ ΜΕ ΤΟΝ ADAPTER
+                    return Glide.with(this@MainActivity)
+                        .asBitmap()
+                        .load(item.path)
+                        .signature(ObjectKey(item.path + item.lastModifiedCached))
+                        .diskCacheStrategy(DiskCacheStrategy.RESOURCE) // Αποθηκεύει μόνο το τελικό thumbnail των 120x120
+                        .override(120, 120)
+                        .centerCrop()
                 }
             }
 
-            override fun getPreloadRequestBuilder(item: FileModel): RequestBuilder<*> {
-                // ΕΔΩ ΠΡΕΠΕΙ ΝΑ ΕΙΝΑΙ ΑΚΡΙΒΩΣ ΟΙ ΙΔΙΕΣ ΡΥΘΜΙΣΕΙΣ ΜΕ ΤΟΝ ADAPTER
-                return Glide.with(this@MainActivity)
-                    .asBitmap()
-                    .load(item.path)
-                    .signature(ObjectKey(item.path + item.lastModifiedCached))
-                    .diskCacheStrategy(DiskCacheStrategy.RESOURCE) // Αποθηκεύει μόνο το τελικό thumbnail των 120x120
-                    .override(120, 120)
-                    .centerCrop()
-            }
-        }
-
 // 3. Σύνδεση του Preloader με το RecyclerView (Προ-φορτώνουμε 30 στοιχεία μπροστά!)
-        val preloader = com.bumptech.glide.integration.recyclerview.RecyclerViewPreloader<FileModel>(
-            Glide.with(this), modelProvider, sizeProvider, 50
-        )
+        val preloader =
+            com.bumptech.glide.integration.recyclerview.RecyclerViewPreloader<FileModel>(
+                Glide.with(this), modelProvider, sizeProvider, 50
+            )
         // Στην onCreate της MainActivity.kt:
         binding.recyclerView.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
@@ -139,6 +141,16 @@ class MainActivity : AppCompatActivity() {
             android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
         )
+
+        binding.toolbar.findViewById<ImageButton>(R.id.btnUp).setOnClickListener {
+            val parent = currentPath.parentFile
+            // Έλεγχος για να μην βγούμε έξω από το Root ή το Internal
+            if (parent != null && currentPath.absolutePath != "/") {
+                loadFiles(parent)
+            } else {
+                Toast.makeText(this, "Βρίσκεστε στον αρχικό φάκελο", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         // 1. Toolbar Navigation (Drawer)
         binding.toolbar.setNavigationOnClickListener {
@@ -184,32 +196,40 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 R.id.action_copy -> {
+                    val firstFile = selectedFiles.firstOrNull()?.path ?: ""
+
+                    // ΕΛΕΓΧΟΣ ΜΟΝΟ ΜΕ ΒΑΣΗ ΤΟ PATH
+                    val isSmbSource = firstFile.startsWith("smb://")
+                    val isSftpSource = firstFile.startsWith("sftp://")
+
                     TransferManager.filesToMove = selectedFiles
                     TransferManager.isCut = false
+                    TransferManager.sourceIsSmb = isSmbSource
+                    TransferManager.sourceIsSftp = isSftpSource
 
-                    // ΕΔΩ Η ΑΛΛΑΓΗ: Αν το protocol είναι SMB, τότε sourceIsSmb = true
-                    TransferManager.sourceIsSmb = (protocol == "SMB")
-                    TransferManager.sourceIsSftp = (protocol == "SFTP") // Αν έχεις προσθέσει αυτό το flag
-
+                    Log.d("TRANSFER_DEBUG", "Copy - SMB: $isSmbSource, SFTP: $isSftpSource, Path: $firstFile")
                     startBulkMove(selectedFiles, isCut = false)
-
-                    val intent = Intent(this, DashboardActivity::class.java)
-                    intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    startActivity(intent)
-                    finish()
+                    goToDashboard()
                     true
                 }
 
                 R.id.action_cut -> {
+                    val firstFile = selectedFiles.firstOrNull()?.path ?: ""
+
+                    // Αφαιρούμε το "|| protocol == ..." για να μην μπερδεύεται με την παλιά τιμή
+                    val isSmbSource = firstFile.startsWith("smb://")
+                    val isSftpSource = firstFile.startsWith("sftp://")
+
                     TransferManager.filesToMove = selectedFiles
                     TransferManager.isCut = true
+                    TransferManager.sourceIsSmb = isSmbSource
+                    TransferManager.sourceIsSftp = isSftpSource
 
-                    // ΕΔΩ Η ΑΛΛΑΓΗ: Παρομοίως, ενημερώνουμε την πηγή
-                    TransferManager.sourceIsSmb = (protocol == "SMB")
-                    TransferManager.sourceIsSftp = (protocol == "SFTP")
+                    Log.d("TRANSFER_DEBUG", "Cut - SMB: $isSmbSource, SFTP: $isSftpSource, Path: $firstFile")
 
                     startBulkMove(selectedFiles, isCut = true)
 
+                    // Εδώ ο κώδικας για το Intent (αφού δεν έχεις την helper goToDashboard)
                     val intent = Intent(this, DashboardActivity::class.java)
                     intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                     startActivity(intent)
@@ -314,6 +334,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun goToDashboard() {
+        val intent = Intent(this, DashboardActivity::class.java)
+        intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        startActivity(intent)
+        finish()
+    }
+
     private fun setupNavigationDrawer() {
         binding.navigationView.setNavigationItemSelectedListener { item ->
             when (item.itemId) {
@@ -354,13 +381,17 @@ class MainActivity : AppCompatActivity() {
         currentPath = directory
         val displayTitle = getDisplayTitle(directory.absolutePath)
         supportActionBar?.title = displayTitle
-        binding.toolbar.title = displayTitle
+        updateBreadcrumbs(directory.absolutePath) // Προσθήκη εδώ
 
         // Χρησιμοποιούμε lifecycleScope αντί για MainScope για καλύτερη διαχείριση μνήμης
         lifecycleScope.launch {
             val fileList = withContext(Dispatchers.IO) {
                 val tempArrayList = mutableListOf<FileModel>()
-                val files = try { directory.listFiles() } catch (e: Exception) { null }
+                val files = try {
+                    directory.listFiles()
+                } catch (e: Exception) {
+                    null
+                }
 
                 if (files != null) {
                     for (file in files) {
@@ -372,7 +403,10 @@ class MainActivity : AppCompatActivity() {
                                 name = file.name,
                                 path = file.absolutePath,
                                 isDirectory = file.isDirectory,
-                                size = cachedSize ?: if (file.isDirectory) "--" else FolderCalculator.formatSize(file.length()),
+                                size = cachedSize
+                                    ?: if (file.isDirectory) "--" else FolderCalculator.formatSize(
+                                        file.length()
+                                    ),
                                 isSelected = false,
                                 lastModifiedCached = lastModValue // <--- Πρόσεξε το κόμμα στην προηγούμενη γραμμή!
                             )
@@ -380,7 +414,8 @@ class MainActivity : AppCompatActivity() {
                     }
                 } else {
                     // ROOT / BYPASS MODE
-                    val cmd = "export LANG=en_US.UTF-8; ls -p -N --color=never \"${directory.absolutePath}\""
+                    val cmd =
+                        "export LANG=en_US.UTF-8; ls -p -N --color=never \"${directory.absolutePath}\""
                     val output = RootTools.getOutput(cmd)
                     if (output.isNotEmpty() && !output.contains("Error:")) {
                         output.split("\n").forEach { line ->
@@ -593,13 +628,15 @@ class MainActivity : AppCompatActivity() {
             output.split("\n").forEach { path ->
                 val file = File(path.trim())
                 if (file.exists()) {
-                    searchResults.add(FileModel(
-                        file.name,
-                        file.absolutePath,
-                        file.isDirectory,
-                        if (file.isDirectory) "--" else FolderCalculator.formatSize(file.length()),
-                        false
-                    ))
+                    searchResults.add(
+                        FileModel(
+                            file.name,
+                            file.absolutePath,
+                            file.isDirectory,
+                            if (file.isDirectory) "--" else FolderCalculator.formatSize(file.length()),
+                            false
+                        )
+                    )
                 }
             }
 
@@ -613,18 +650,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun pasteFile() {
-        // 1. ΕΛΕΓΧΟΣ: Μήπως έρχονται αρχεία από Δίκτυο (SMB ή SFTP);
+        Log.d("TRANSFER_DEBUG", "--- Paste Initiated ---")
+        Log.d("TRANSFER_DEBUG", "Files to move count: ${TransferManager.filesToMove.size}")
+        Log.d("TRANSFER_DEBUG", "Protocol Flags -> SMB: ${TransferManager.sourceIsSmb}, SFTP: ${TransferManager.sourceIsSftp}")
+
+        // 1. Έλεγχος Δικτύου
         if (TransferManager.filesToMove.isNotEmpty() && (TransferManager.sourceIsSmb || TransferManager.sourceIsSftp)) {
-            executeLocalPaste()
+            Log.d("TRANSFER_DEBUG", "Redirecting to Network Download Flow")
+            executeNetworkDownload()
             return
         }
 
-        // 2. ΤΟΠΙΚΗ ΕΠΙΚΟΛΛΗΣΗ (Ανάμεσα σε φακέλους του κινητού)
-        // Τραβάμε τα δεδομένα από τον TransferManager γιατί οι τοπικές μεταβλητές χάθηκαν στο Dashboard
+        // 2. Τοπική Επικόλληση
         val filesToProcess = TransferManager.filesToMove
-        val isCut = TransferManager.isCut // Χρησιμοποιούμε το isCut του TransferManager
+        val isCut = TransferManager.isCut
 
         if (filesToProcess.isEmpty()) {
+            Log.e("TRANSFER_DEBUG", "Abort: filesToProcess is EMPTY")
             Toast.makeText(this, "Δεν υπάρχουν αρχεία για επικόλληση", Toast.LENGTH_SHORT).show()
             return
         }
@@ -634,64 +676,81 @@ class MainActivity : AppCompatActivity() {
             var allSuccess = true
 
             val rawDestDir = currentPath.absolutePath
-            val realDestDir = if (rawDestDir.startsWith("/storage/emulated/0")) {
-                rawDestDir.replace("/storage/emulated/0", "/data/media/0")
-            } else {
-                rawDestDir
-            }
+            val realDestDir = rawDestDir.replace("/storage/emulated/0", "/data/media/0")
+
+            Log.d("TRANSFER_DEBUG", "Destination - Raw: $rawDestDir, Real: $realDestDir")
 
             val isSystemTarget = realDestDir.startsWith("/system") || realDestDir.startsWith("/vendor") || realDestDir == "/"
-            if (isSystemTarget) RootTools.unlockSystem()
+            if (isSystemTarget) {
+                Log.d("TRANSFER_DEBUG", "System target detected, unlocking...")
+                RootTools.unlockSystem()
+            }
 
             withContext(Dispatchers.IO) {
-                filesToProcess.forEach { model ->
-                    val rawSourcePath = model.path
-                    val realSourcePath = if (rawSourcePath.startsWith("/storage/emulated/0")) {
-                        rawSourcePath.replace("/storage/emulated/0", "/data/media/0")
-                    } else {
-                        rawSourcePath
-                    }
+                filesToProcess.forEachIndexed { index, fileModel ->
+                    Log.d("TRANSFER_DEBUG", "Processing file [$index]: ${fileModel.name}")
+                    Log.d("TRANSFER_DEBUG", "Source Path: ${fileModel.path}")
 
-                    val fileName = File(rawSourcePath).name
+                    val realSourcePath = fileModel.path.replace("/storage/emulated/0", "/data/media/0")
+                    val fileName = File(fileModel.path).name
                     val finalDestPath = "$realDestDir/$fileName".replace("//", "/")
 
                     try {
-                        // ΠΡΟΣΟΧΗ: Εδώ χρησιμοποιούμε την τοπική μεταβλητή isCut που πήραμε από τον Manager
-                        val command = if (isCut) "mv '$realSourcePath' '$finalDestPath'" else "cp -r '$realSourcePath' '$finalDestPath'"
+                        val command = if (isCut) {
+                            "mv \"$realSourcePath\" \"$finalDestPath\""
+                        } else {
+                            "cp -r \"$realSourcePath\" \"$finalDestPath\""
+                        }
+
+                        Log.d("TRANSFER_DEBUG", "Executing Command: $command")
+
                         val result = RootTools.executeSilent(command)
+                        Log.d("TRANSFER_DEBUG", "Command Result: $result")
+
                         if (!result) allSuccess = false
                     } catch (e: Exception) {
+                        Log.e("TRANSFER_DEBUG", "Exception during local paste: ${e.message}")
                         allSuccess = false
                     }
                 }
             }
 
             if (isSystemTarget) RootTools.lockSystem()
+
+            Log.d("TRANSFER_DEBUG", "Cleaning up TransferManager...")
+            cleanupTransfer()
+
             binding.progressBar.visibility = View.GONE
             loadFiles(currentPath)
 
-            // ΚΑΘΑΡΙΣΜΟΣ
-            binding.fabPaste.hide()
-            TransferManager.filesToMove = emptyList() // Αδειάζουμε τον Manager για να μην ξανακάνει Paste τα ίδια
-            fileToMove = null
-            bulkFilesToMove = emptyList()
-
-            Toast.makeText(this@MainActivity, if (allSuccess) "Ολοκληρώθηκε!" else "Αποτυχία", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this@MainActivity, if (allSuccess) "Ολοκληρώθηκε!" else "Αποτυχία (Check Logs)", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun executeLocalPaste() {
+    // Βοηθητική συνάρτηση για καθαρισμό
+    private fun cleanupTransfer() {
+        TransferManager.filesToMove = emptyList()
+        TransferManager.sourceIsSmb = false
+        TransferManager.sourceIsSftp = false
+        TransferManager.isCut = false
+        fileToMove = null
+        bulkFilesToMove = emptyList()
+        binding.fabPaste.hide()
+    }
+
+    private fun executeNetworkDownload() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 withContext(Dispatchers.Main) { binding.progressBar.visibility = View.VISIBLE }
 
                 val targetDir = currentPath
+                val isCut = TransferManager.isCut
 
                 TransferManager.filesToMove.forEach { model ->
                     val localDest = File(targetDir, model.name)
 
                     if (TransferManager.sourceIsSftp) {
-                        // --- SFTP DOWNLOAD (ΝΕΟ) ---
+                        // --- SFTP DOWNLOAD ---
                         val jsch = com.jcraft.jsch.JSch()
                         val session = jsch.getSession(TransferManager.sftpUser, TransferManager.sftpHost, 22)
                         session.setPassword(TransferManager.sftpPass)
@@ -700,16 +759,15 @@ class MainActivity : AppCompatActivity() {
 
                         val channel = session.openChannel("sftp") as com.jcraft.jsch.ChannelSftp
                         channel.connect()
-
                         channel.get(model.path, localDest.absolutePath)
 
-                        if (TransferManager.isCut) channel.rm(model.path)
+                        if (isCut) channel.rm(model.path)
 
                         channel.disconnect()
                         session.disconnect()
 
                     } else if (TransferManager.sourceIsSmb) {
-                        // --- SMB DOWNLOAD (Ο ΔΙΚΟΣ ΣΟΥ ΚΩΔΙΚΑΣ ΠΟΥ ΔΟΥΛΕΥΕ) ---
+                        // --- SMB DOWNLOAD ---
                         val props = java.util.Properties()
                         props.setProperty("jcifs.smb.client.dfs.disabled", "true")
                         val config = org.codelibs.jcifs.smb.config.PropertyConfiguration(props)
@@ -718,25 +776,28 @@ class MainActivity : AppCompatActivity() {
                             null, TransferManager.smbUser, TransferManager.smbPass
                         )
                         val smbContext = baseContext.withCredentials(auth)
-
-                        // Επαναφορά στο path που δούλευε (org.codelibs.jcifs.smb.impl.SmbFile)
                         val smbSource = org.codelibs.jcifs.smb.impl.SmbFile(model.path, smbContext)
 
-                        // Προσοχή: Χρήση getInputStream() αντί για .inputStream
                         smbSource.getInputStream().use { input ->
                             localDest.outputStream().use { output ->
                                 input.copyTo(output)
                             }
                         }
 
-                        if (TransferManager.isCut) smbSource.delete()
+                        if (isCut) smbSource.delete()
                     }
                 }
 
                 withContext(Dispatchers.Main) {
                     binding.progressBar.visibility = View.GONE
                     loadFiles(currentPath)
+
+                    // ΚΑΘΑΡΙΣΜΟΣ FLAGS
                     TransferManager.filesToMove = emptyList()
+                    TransferManager.sourceIsSmb = false
+                    TransferManager.sourceIsSftp = false
+                    TransferManager.isCut = false
+
                     binding.fabPaste.hide()
                     Toast.makeText(this@MainActivity, "Η λήψη ολοκληρώθηκε!", Toast.LENGTH_SHORT).show()
                 }
@@ -1183,6 +1244,7 @@ class MainActivity : AppCompatActivity() {
                         if (entry.contains("@")) entry.substringAfter("@")
                         else entry.replace("sftp://", "")
                     }
+
                     else -> File(entry).name
                 }
                 name to entry
@@ -1201,7 +1263,10 @@ class MainActivity : AppCompatActivity() {
             // --- Εικονίδιο ---
             when {
                 realPath.startsWith("ftp://") -> menuItem.setIcon(android.R.drawable.ic_menu_share)
-                realPath.startsWith("smb://") || entry.startsWith("SFTP:") -> menuItem.setIcon(android.R.drawable.ic_menu_set_as)
+                realPath.startsWith("smb://") || entry.startsWith("SFTP:") -> menuItem.setIcon(
+                    android.R.drawable.ic_menu_set_as
+                )
+
                 else -> menuItem.setIcon(android.R.drawable.ic_dialog_map)
             }
 
@@ -1219,11 +1284,13 @@ class MainActivity : AppCompatActivity() {
                         intent.putExtra("TARGET_HOST", host)
                         startActivity(intent)
                     }
+
                     realPath.startsWith("smb://") || entry.startsWith("SFTP:") -> {
                         val intent = Intent(this, NetworkClientActivity::class.java)
                         intent.putExtra("FAVORITE_SMB_DATA", entry)
                         startActivity(intent)
                     }
+
                     else -> {
                         val folder = File(realPath)
                         if (folder.exists()) loadFiles(folder)
@@ -1235,9 +1302,10 @@ class MainActivity : AppCompatActivity() {
 
             // 2. ΚΛΙΚ ΣΤΙΣ ΤΡΕΙΣ ΤΕΛΕΙΕΣ (ImageButton)
             // Χρησιμοποιούμε το ImageButton από το νέο XML
-            actionView?.findViewById<android.widget.ImageButton>(R.id.btnMoreOptions)?.setOnClickListener { view ->
-                showFavoritePopupMenu(view, entry, index)
-            }
+            actionView?.findViewById<android.widget.ImageButton>(R.id.btnMoreOptions)
+                ?.setOnClickListener { view ->
+                    showFavoritePopupMenu(view, entry, index)
+                }
 
             // 3. Καθαρισμός για το Drag & Drop
             // Αφαιρούμε τυχόν παλιά Clicks από το actionView για να μην "κλέβουν" το Long Click
@@ -1361,7 +1429,8 @@ class MainActivity : AppCompatActivity() {
         val prefsDash = getSharedPreferences("dashboard_pins", MODE_PRIVATE)
         val currentDashString = prefsDash.getString("paths", "") ?: ""
         android.util.Log.d("DRAG_DEBUG", "Current Dashboard state before sync: $currentDashString")
-        val currentDashList = currentDashString.split("|").filter { it.isNotEmpty() }.toMutableList()
+        val currentDashList =
+            currentDashString.split("|").filter { it.isNotEmpty() }.toMutableList()
 
         // ΑΦΑΙΡΕΣΗ: Αν κάτι δεν υπάρχει πια στα favoritePaths, το βγάζουμε και από το Dashboard
         val iterator = currentDashList.iterator()
@@ -1446,7 +1515,10 @@ class MainActivity : AppCompatActivity() {
 
                 override fun isLongPressDragEnabled(): Boolean = true
 
-                override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                override fun clearView(
+                    recyclerView: RecyclerView,
+                    viewHolder: RecyclerView.ViewHolder
+                ) {
                     super.clearView(recyclerView, viewHolder)
 
                     android.util.Log.d("DRAG_DEBUG", "New order: $favoritePaths")
@@ -1467,8 +1539,9 @@ class MainActivity : AppCompatActivity() {
 
         val itemView = viewHolder.itemView
 
-        val titleView = itemView.findViewById<TextView>(com.google.android.material.R.id.design_menu_item_text)
-            ?: return -1
+        val titleView =
+            itemView.findViewById<TextView>(com.google.android.material.R.id.design_menu_item_text)
+                ?: return -1
 
         val title = titleView.text?.toString() ?: return -1
 
@@ -1577,6 +1650,46 @@ class MainActivity : AppCompatActivity() {
                 val name = File(normalized).name
                 if (name.isEmpty()) normalized else name
             }
+        }
+    }
+
+    private fun updateBreadcrumbs(path: String) {
+        val crumbs = mutableListOf<Pair<String, String>>()
+
+        // 1. Διαχείριση Internal Storage
+        val internalBase = "/storage/emulated/0"
+        if (path.startsWith(internalBase)) {
+            crumbs.add("Internal" to internalBase)
+            val relativePath = path.removePrefix(internalBase)
+            val parts = relativePath.split("/").filter { it.isNotEmpty() }
+            var currentAccumulated = internalBase
+            parts.forEach { part ->
+                currentAccumulated += "/$part"
+                crumbs.add(part to currentAccumulated)
+            }
+        } else {
+            // 2. Διαχείριση Root (/)
+            crumbs.add("Root" to "/")
+            val parts = path.split("/").filter { it.isNotEmpty() }
+            var currentAccumulated = ""
+            parts.forEach { part ->
+                currentAccumulated += "/$part"
+                crumbs.add(part to currentAccumulated)
+            }
+        }
+
+        // 3. Σύνδεση με το RecyclerView που βάλαμε στην Toolbar
+        val breadcrumbRv = binding.toolbar.findViewById<RecyclerView>(R.id.breadcrumbRecyclerView)
+        val bcAdapter = BreadcrumbAdapter(crumbs) { clickedPath ->
+            loadFiles(File(clickedPath)) // Κλικ σε οποιοδήποτε φάκελο της διαδρομής
+        }
+
+        breadcrumbRv.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
+        breadcrumbRv.adapter = bcAdapter
+
+        // Σκρολάρισμα στο τέλος για να βλέπουμε τον τρέχοντα φάκελο αν η διαδρομή είναι μεγάλη
+        if (crumbs.isNotEmpty()) {
+            breadcrumbRv.scrollToPosition(crumbs.size - 1)
         }
     }
 }
