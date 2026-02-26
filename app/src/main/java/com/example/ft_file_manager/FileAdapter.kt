@@ -118,10 +118,10 @@ class FileAdapter(
                     .into(holder.icon)
             } else {
                 when (extension) {
-                    "txt", "log" -> holder.icon.setImageResource(R.drawable.text_ad_24px)
+                    "txt", "log", "java", "py", "xml", "json", "html", "css", "js", "ini", "conf" -> holder.icon.setImageResource(R.drawable.text_ad_24px)
                     "zip", "rar", "7z" -> holder.icon.setImageResource(R.drawable.folder_zip_24px)
-                    "mp4", "mkv", "avi" -> holder.icon.setImageResource(R.drawable.video_camera_back_24px)
-                    "mp3", "wav" -> holder.icon.setImageResource(R.drawable.music_note_2_24px)
+                    "mp4", "mkv", "avi","3gp", "webm" -> holder.icon.setImageResource(R.drawable.video_camera_back_24px)
+                    "mp3", "aac", "wav", "m4a" -> holder.icon.setImageResource(R.drawable.music_note_2_24px)
                     "apk" -> {
                         ApkIconLoader.load(holder.icon.context, fileModel.path, holder.icon)
                     }

@@ -1812,7 +1812,7 @@ class MainActivity : AppCompatActivity() {
 
         // Τα αρχεία που ανοίγουν εσωτερικά στην εφαρμογή σου
         when (extension) {
-            "txt", "log", "java", "py", "xml", "json", "html" -> {
+            "txt", "log", "java", "py", "xml", "json", "html", "css", "js", "ini", "conf" -> {
                 val intent = Intent(this, TextEditorActivity::class.java)
                 intent.putExtra("PATH", file.absolutePath)
                 startActivity(intent)
@@ -1829,13 +1829,13 @@ class MainActivity : AppCompatActivity() {
                 prepareVirtualFolder(file)
                 return
             }
-            "mp4", "mkv", "3gp", "webm" -> {
+            "mp4", "mkv", "avi", "3gp", "webm", "mp3", "aac", "wav", "m4a", "flac" -> {
                 val intent = Intent(this, VideoPlayerActivity::class.java)
                 intent.putExtra("PATH", file.absolutePath)
                 startActivity(intent)
                 return
             }
-            "jpg", "jpeg", "png", "gif", "webp" -> {
+            "jpg", "jpeg", "png", "gif", "webp", "bmp" -> {
                 val intent = Intent(this, ImageViewActivity::class.java)
                 intent.putExtra("PATH", file.absolutePath)
                 startActivity(intent)
