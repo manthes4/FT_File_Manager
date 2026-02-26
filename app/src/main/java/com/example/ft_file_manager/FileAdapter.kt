@@ -1,6 +1,10 @@
 package com.example.ft_file_manager
 
+import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -13,6 +17,7 @@ import android.webkit.MimeTypeMap
 import androidx.recyclerview.widget.DiffUtil
 import com.bumptech.glide.load.engine.DiskCacheStrategy
 import com.bumptech.glide.signature.ObjectKey
+import com.bumptech.glide.load.resource.drawable.DrawableTransitionOptions
 
 class FileAdapter(
     private var files: List<FileModel>,
@@ -113,13 +118,20 @@ class FileAdapter(
                     .into(holder.icon)
             } else {
                 when (extension) {
-                    "pdf" -> holder.icon.setImageResource(R.drawable.picture_as_pdf_24px)
                     "txt", "log" -> holder.icon.setImageResource(R.drawable.text_ad_24px)
                     "zip", "rar", "7z" -> holder.icon.setImageResource(R.drawable.folder_zip_24px)
                     "mp4", "mkv", "avi" -> holder.icon.setImageResource(R.drawable.video_camera_back_24px)
                     "mp3", "wav" -> holder.icon.setImageResource(R.drawable.music_note_2_24px)
                     "apk" -> {
                         ApkIconLoader.load(holder.icon.context, fileModel.path, holder.icon)
+                    }
+                    "pdf" -> {
+                        val bitmap = getPdfThumbnail(holder.icon.context, file)
+                        if (bitmap != null) {
+                            holder.icon.setImageBitmap(bitmap)
+                        } else {
+                            holder.icon.setImageResource(R.drawable.picture_as_pdf_24px)
+                        }
                     }
 
                     else -> holder.icon.setImageResource(R.drawable.apk_document_24px)
@@ -140,6 +152,25 @@ class FileAdapter(
 
         holder.itemView.setOnClickListener {
             onItemClick(fileModel)
+        }
+    }
+
+    // Μια απλή συνάρτηση για δημιουργία Thumbnail από PDF
+    fun getPdfThumbnail(context: Context, file: File): Bitmap? {
+        return try {
+            val fd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            val renderer = PdfRenderer(fd)
+            val page = renderer.openPage(0) // Παίρνουμε την 1η σελίδα
+
+            val bitmap = Bitmap.createBitmap(page.width / 4, page.height / 4, Bitmap.Config.ARGB_8888)
+            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+
+            page.close()
+            renderer.close()
+            fd.close()
+            bitmap
+        } catch (e: Exception) {
+            null
         }
     }
 
