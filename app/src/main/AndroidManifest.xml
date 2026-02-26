@@ -21,6 +21,7 @@
         android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.FTFileManager">
 
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"
@@ -30,6 +31,14 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <receiver
+            android:name=".CustomChooserReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.ft_file_manager.ACTION_CHOSEN" />
+            </intent-filter>
+        </receiver>
 
         <activity
             android:name=".MainActivity"
@@ -62,4 +71,11 @@
             android:exported="false" />
 
     </application>
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="*/*" />
+        </intent>
+    </queries>
 </manifest>

@@ -36,4 +36,10 @@
         android:title="Share"
         android:icon="@android:drawable/ic_menu_share"
         app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/action_reset_app"
+        android:title="Reset default apps"
+        android:icon="@android:drawable/ic_menu_revert"
+        app:showAsAction="never" />
 </menu>

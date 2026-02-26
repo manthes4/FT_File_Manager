@@ -1,5 +1,6 @@
 package com.example.ft_file_manager
 
+import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -12,6 +13,7 @@ import android.view.View
 import android.widget.ImageButton
 import android.view.Menu
 import android.view.ViewGroup
+import android.webkit.MimeTypeMap
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
@@ -244,6 +246,32 @@ class MainActivity : AppCompatActivity() {
 
                 R.id.action_delete -> {
                     confirmBulkDelete(selectedFiles); true
+                }
+
+                R.id.action_reset_app -> {
+                    if (selectedFiles.isNotEmpty()) {
+                        selectedFiles.forEach { model ->
+                            // Παίρνουμε την κατάληξη από το path ή το name
+                            val fileName = model.name ?: ""
+                            val extension = fileName.substringAfterLast('.', "").lowercase()
+
+                            if (extension.isNotEmpty()) {
+                                val mimeType = android.webkit.MimeTypeMap.getSingleton()
+                                    .getMimeTypeFromExtension(extension) ?: "*/*"
+
+                                // Καθαρισμός προτίμησης
+                                getSharedPreferences("AppPreferences", MODE_PRIVATE).edit()
+                                    .remove("pref_$mimeType")
+                                    .apply()
+
+                                Toast.makeText(this, "Reset: .$extension", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        exitSelectionMode() // Κλείνουμε το μενού επιλογής αφού τελειώσουμε
+                    } else {
+                        Toast.makeText(this, "Επιλέξτε αρχεία πρώτα", Toast.LENGTH_SHORT).show()
+                    }
+                    true
                 }
 
                 else -> false
@@ -613,6 +641,23 @@ class MainActivity : AppCompatActivity() {
 
         view.findViewById<TextView>(R.id.btnShare).setOnClickListener {
             shareFile(file)
+            dialog.dismiss()
+        }
+
+        view.findViewById<TextView>(R.id.btnResetAppPreference).setOnClickListener {
+            val fileName = file.name ?: ""
+            val extension = fileName.substringAfterLast('.', "").lowercase()
+
+            if (extension.isNotEmpty()) {
+                val mimeType = android.webkit.MimeTypeMap.getSingleton()
+                    .getMimeTypeFromExtension(extension) ?: "*/*"
+
+                getSharedPreferences("AppPreferences", MODE_PRIVATE).edit()
+                    .remove("pref_$mimeType")
+                    .apply()
+
+                Toast.makeText(this, "Η προτίμηση για .$extension καθαρίστηκε", Toast.LENGTH_SHORT).show()
+            }
             dialog.dismiss()
         }
 
@@ -1606,60 +1651,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openFile(file: File) {
-        val extension = file.extension.lowercase()
-
-        when (extension) {
-            "txt", "log", "java", "py", "xml", "json", "html" -> {
-                val intent = Intent(this, TextEditorActivity::class.java)
-                intent.putExtra("PATH", file.absolutePath)
-                startActivity(intent)
-            }
-
-            "jpg", "jpeg", "png", "gif", "webp" -> {
-                // Εδώ θα φτιάξεις μια ImageViewActivity αντίστοιχα
-                val intent = Intent(this, ImageViewActivity::class.java)
-                intent.putExtra("PATH", file.absolutePath)
-                startActivity(intent)
-            }
-
-            "pdf" -> {
-                // Για PDF, αν δεν θες βιβλιοθήκη, η καλύτερη λύση εσωτερικά
-                // είναι το PdfRenderer του Android (θέλει λίγο κώδικα παραπάνω)
-                openPdfInternal(file)
-            }
-
-            else -> {
-                // Για όλα τα άλλα (mp3, mp4, docx), άνοιγμα με εξωτερική εφαρμογή
-                openFileExternally(file)
-            }
-        }
-    }
-
-    private fun openFileExternally(file: File) {
-        try {
-            val uri = androidx.core.content.FileProvider.getUriForFile(
-                this, "${packageName}.provider", file
-            )
-            val extension = file.extension.lowercase()
-            val mimeType = android.webkit.MimeTypeMap.getSingleton()
-                .getMimeTypeFromExtension(extension) ?: "*/*"
-
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, mimeType)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            startActivity(Intent.createChooser(intent, "Άνοιγμα με:"))
-        } catch (e: Exception) {
-            Toast.makeText(this, "Αποτυχία ανοίγματος: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun openPdfInternal(file: File) {
-        // Προσωρινά τα στέλνουμε έξω μέχρι να φτιάξουμε τον δικό μας Viewer
-        openFileExternally(file)
-    }
-
     private fun getDisplayTitle(path: String): String {
         // Αν το path είναι ακριβώς "/", το επιστρέφουμε αμέσως
         if (path == "/") return "Root"
@@ -1724,6 +1715,185 @@ class MainActivity : AppCompatActivity() {
         if (crumbs.isNotEmpty()) {
             breadcrumbRv.scrollToPosition(crumbs.size - 1)
         }
+    }
+
+    private fun openFile(file: File) {
+        val extension = file.extension.lowercase()
+
+        // Τα αρχεία που ανοίγουν εσωτερικά στην εφαρμογή σου
+        when (extension) {
+            "txt", "log", "java", "py", "xml", "json", "html" -> {
+                val intent = Intent(this, TextEditorActivity::class.java)
+                intent.putExtra("PATH", file.absolutePath)
+                startActivity(intent)
+                return
+            }
+            "jpg", "jpeg", "png", "gif", "webp" -> {
+                val intent = Intent(this, ImageViewActivity::class.java)
+                intent.putExtra("PATH", file.absolutePath)
+                startActivity(intent)
+                return
+            }
+        }
+
+        // ΓΙΑ ΟΛΑ ΤΑ ΑΛΛΑ (APK, PDF, MP4 κλπ)
+        val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "*/*"
+        val prefs = getSharedPreferences("AppPreferences", MODE_PRIVATE)
+        val savedPackage = prefs.getString("pref_$mimeType", null)
+
+        if (savedPackage != null) {
+            // Αν υπάρχει σωσμένη εφαρμογή, την ανοίγουμε απευθείας
+            openFileExternally(file)
+        } else {
+            // ΑΝ ΔΕΝ ΥΠΑΡΧΕΙ, ρωτάμε τον χρήστη (Μία φορά / Πάντα)
+            val uri = FileProvider.getUriForFile(this, "${packageName}.provider", file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            showOpenWithDecisionDialog(file, intent, mimeType)
+        }
+    }
+
+    private fun openFileExternally(file: File) {
+        val extension = file.extension.lowercase()
+        val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "*/*"
+        val uri = FileProvider.getUriForFile(this, "${packageName}.provider", file)
+
+        // 1. Έλεγχος αν υπάρχει ήδη σωσμένη προτίμηση (για να ανοίγει σφαίρα)
+        val prefs = getSharedPreferences("AppPreferences", MODE_PRIVATE)
+        val savedData = prefs.getString("pref_$mimeType", null)
+
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeType)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        if (savedData != null && savedData.contains("|")) {
+            val parts = savedData.split("|")
+            intent.setClassName(parts[0], parts[1])
+            try {
+                startActivity(intent)
+                return
+            } catch (e: Exception) {
+                prefs.edit().remove("pref_$mimeType").apply()
+            }
+        }
+
+        // 2. Αν δεν υπάρχει προτίμηση, ανοίγουμε τον Chooser και περιμένουμε την απάντηση
+        CustomChooserReceiver.onAppSelected = { component ->
+            // ΕΔΩ ΚΛΕΒΟΥΜΕ ΤΟ ΚΛΙΚ!
+            runOnUiThread {
+                showAlwaysAskDialog(file, component, mimeType)
+            }
+        }
+
+        val receiverIntent = Intent(this, CustomChooserReceiver::class.java)
+        val pendingIntent = android.app.PendingIntent.getBroadcast(
+            this, 0, receiverIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_MUTABLE
+        )
+
+        val chooser = Intent.createChooser(intent, "Άνοιγμα αρχείου...", pendingIntent.intentSender)
+        startActivity(chooser)
+    }
+
+    private fun showOpenWithDecisionDialog(file: File, intent: Intent, mimeType: String) {
+        val options = arrayOf("Άνοιγμα (Μία φορά)", "Επιλογή προεπιλεγμένης εφαρμογής (Πάντα)")
+
+        AlertDialog.Builder(this)
+            .setTitle("Άνοιγμα αρχείου")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        // Χρησιμοποιούμε τον Chooser του Android για το "Μία φορά"
+                        val chooser = Intent.createChooser(intent, "Επιλογή εφαρμογής")
+                        startActivity(chooser)
+                    }
+                    1 -> showSetDefaultAppDialog(file) // Το δικό μας μενού για το "Πάντα"
+                }
+            }
+            .show()
+    }
+
+    private fun showSetDefaultAppDialog(file: File) {
+        val extension = file.extension.lowercase()
+        val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "*/*"
+        val uri = FileProvider.getUriForFile(this, "${packageName}.provider", file)
+
+        val queryIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeType)
+        }
+
+        // Χρησιμοποιούμε FLAG_ACTIVITY_MATCH_DEFAULT_ONLY για να δούμε τι προσφέρει το σύστημα
+        val pm = packageManager
+        val activities = pm.queryIntentActivities(queryIntent, 0)
+
+        if (activities.isEmpty()) {
+            Toast.makeText(this, "Δεν βρέθηκαν εφαρμογές για αρχεία .$extension", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Μέσα στη showSetDefaultAppDialog
+        val names = activities.map { it.loadLabel(pm).toString() }.toTypedArray()
+// Αποθηκεύουμε Package και Class Name μαζί
+        val components = activities.map { "${it.activityInfo.packageName}|${it.activityInfo.name}" }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Επιλογή προεπιλογής")
+            .setItems(names) { _, which ->
+                val selected = components[which]
+                getSharedPreferences("AppPreferences", MODE_PRIVATE).edit()
+                    .putString("pref_$mimeType", selected)
+                    .apply()
+
+                openFileExternally(file)
+            }
+            .show()
+    }
+
+    private fun showAlwaysAskDialog(file: File, component: android.content.ComponentName, mimeType: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Προεπιλεγμένη εφαρμογή")
+            .setMessage("Θέλετε να ανοίγετε πάντα τα αρχεία .${file.extension} με αυτή την εφαρμογή;")
+            .setPositiveButton("Ναι") { _, _ ->
+                val dataToSave = "${component.packageName}|${component.className}"
+                getSharedPreferences("AppPreferences", MODE_PRIVATE).edit()
+                    .putString("pref_$mimeType", dataToSave)
+                    .apply()
+                Toast.makeText(this, "Η προτίμηση αποθηκεύτηκε!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Όχι", null)
+            .show()
+    }
+
+    private fun openPdfInternal(file: File) {
+        // Προσωρινά τα στέλνουμε έξω μέχρι να φτιάξουμε τον δικό μας Viewer
+        openFileExternally(file)
+    }
+
+    private fun resetDefaultApp() {
+        // Επιλογή Α: Καθαρισμός ΟΛΩΝ των προτιμήσεων εφαρμογών (Το πιο σίγουρο)
+        val prefs = getSharedPreferences("AppPreferences", MODE_PRIVATE)
+
+        AlertDialog.Builder(this)
+            .setTitle("Επαναφορά Προεπιλογών")
+            .setMessage("Θέλετε να καθαρίσετε όλες τις προτιμήσεις εφαρμογών για το άνοιγμα αρχείων;")
+            .setPositiveButton("Ναι, καθαρισμός") { _, _ ->
+                // Διαγράφουμε μόνο τα κλειδιά που ξεκινούν με "pref_"
+                val allEntries = prefs.all
+                val editor = prefs.edit()
+                for (entry in allEntries.keys) {
+                    if (entry.startsWith("pref_")) {
+                        editor.remove(entry)
+                    }
+                }
+                editor.apply()
+                Toast.makeText(this, "Όλες οι προτιμήσεις καθαρίστηκαν!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Άκυρο", null)
+            .show()
     }
 }
 

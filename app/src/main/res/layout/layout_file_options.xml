@@ -46,4 +46,14 @@
         android:text="Κοινοποίηση"
         android:textSize="18sp" />
 
+    <TextView
+        android:id="@+id/btnResetAppPreference"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Reset default apps"
+        android:padding="16dp"
+        android:textSize="18sp"
+        android:drawableStart="@android:drawable/ic_menu_revert"
+         />
+
 </LinearLayout>
