@@ -81,6 +81,9 @@
             android:label="Zip Viewer"
             android:theme="@style/Theme.FTFileManager" />
 
+        <activity android:name=".PdfViewerActivity"
+            android:theme="@style/Theme.AppCompat.DayNight.NoActionBar" />
+
     </application>
 
     <queries>

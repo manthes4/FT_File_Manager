@@ -1804,6 +1804,12 @@ class MainActivity : AppCompatActivity() {
                 startActivity(intent)
                 return
             }
+            "pdf" -> {
+                val intent = Intent(this, PdfViewerActivity::class.java)
+                intent.putExtra("PATH", file.absolutePath)
+                startActivity(intent)
+                return // <--- ΑΥΤΟ ΕΙΝΑΙ ΤΟ ΚΡΙΣΙΜΟ! Σταματάει τη MainActivity από το να ανοίξει το Chooser
+            }
             "zip", "rar", "7z" -> {
                 // Αντί για Intent, "ανοίγουμε" το ZIP ως εικονικό φάκελο
                 prepareVirtualFolder(file)
@@ -1984,11 +1990,6 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("Όχι", null)
             .show()
-    }
-
-    private fun openPdfInternal(file: File) {
-        // Προσωρινά τα στέλνουμε έξω μέχρι να φτιάξουμε τον δικό μας Viewer
-        openFileExternally(file)
     }
 
     private fun addToZip(file: File, zos: ZipOutputStream, basePath: String) {
