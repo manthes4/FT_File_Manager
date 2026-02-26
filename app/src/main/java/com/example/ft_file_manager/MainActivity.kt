@@ -1822,35 +1822,34 @@ class MainActivity : AppCompatActivity() {
         val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "*/*"
         val uri = FileProvider.getUriForFile(this, "${packageName}.provider", file)
 
-        val queryIntent = Intent(Intent.ACTION_VIEW).apply {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, mimeType)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
-        // Χρησιμοποιούμε FLAG_ACTIVITY_MATCH_DEFAULT_ONLY για να δούμε τι προσφέρει το σύστημα
-        val pm = packageManager
-        val activities = pm.queryIntentActivities(queryIntent, 0)
-
-        if (activities.isEmpty()) {
-            Toast.makeText(this, "Δεν βρέθηκαν εφαρμογές για αρχεία .$extension", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        // Μέσα στη showSetDefaultAppDialog
-        val names = activities.map { it.loadLabel(pm).toString() }.toTypedArray()
-// Αποθηκεύουμε Package και Class Name μαζί
-        val components = activities.map { "${it.activityInfo.packageName}|${it.activityInfo.name}" }.toTypedArray()
-
-        AlertDialog.Builder(this)
-            .setTitle("Επιλογή προεπιλογής")
-            .setItems(names) { _, which ->
-                val selected = components[which]
+        // 1. Ρυθμίζουμε τον Receiver να "κλέψει" το κλικ
+        CustomChooserReceiver.onAppSelected = { component ->
+            runOnUiThread {
+                // Μόλις ο χρήστης επιλέξει από τον κλασικό επιλογέα, αποθηκεύουμε την προτίμηση
+                val dataToSave = "${component.packageName}|${component.className}"
                 getSharedPreferences("AppPreferences", MODE_PRIVATE).edit()
-                    .putString("pref_$mimeType", selected)
+                    .putString("pref_$mimeType", dataToSave)
                     .apply()
 
-                openFileExternally(file)
+                Toast.makeText(this, "Η προεπιλογή ορίστηκε!", Toast.LENGTH_SHORT).show()
             }
-            .show()
+        }
+
+        // 2. Δημιουργούμε το PendingIntent για τον Receiver
+        val receiverIntent = Intent(this, CustomChooserReceiver::class.java)
+        val pendingIntent = android.app.PendingIntent.getBroadcast(
+            this, 0, receiverIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_MUTABLE
+        )
+
+        // 3. Ανοίγουμε τον κλασικό, όμορφο Chooser του Android
+        val chooser = Intent.createChooser(intent, "Επιλέξτε προεπιλεγμένη εφαρμογή", pendingIntent.intentSender)
+        startActivity(chooser)
     }
 
     private fun showAlwaysAskDialog(file: File, component: android.content.ComponentName, mimeType: String) {
