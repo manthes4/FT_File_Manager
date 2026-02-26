@@ -6,6 +6,8 @@ import androidx.appcompat.app.AppCompatActivity
 import com.bumptech.glide.Glide
 import com.example.ft_file_manager.databinding.ActivityImageViewBinding
 import java.io.File
+// Αν χρειαστεί, κάνε import το PhotoView, αν και το Glide το δέχεται ως View
+import com.github.chrisbanes.photoview.PhotoView
 
 class ImageViewActivity : AppCompatActivity() {
     private lateinit var binding: ActivityImageViewBinding
@@ -22,9 +24,11 @@ class ImageViewActivity : AppCompatActivity() {
         supportActionBar?.title = file.name
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
-        // Φόρτωση της εικόνας με τη βιβλιοθήκη Glide
+        // Η Glide θα "φορτώσει" την εικόνα στο PhotoView
+        // και αυτό θα αναλάβει αυτόματα το Zoom.
         Glide.with(this)
             .load(file)
+            .dontTransform() // <--- ΠΡΟΣΘΕΣΕ ΑΥΤΟ
             .into(binding.ivFullImage)
     }
 

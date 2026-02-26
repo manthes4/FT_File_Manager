@@ -114,4 +114,6 @@ dependencies {
     // Για Kotlin χρησιμοποιούμε ksp ή kapt
     implementation("androidx.room:room-ktx:$room_version")
     kapt("androidx.room:room-compiler:$room_version")
+
+    implementation("com.github.chrisbanes:PhotoView:2.3.0")
 }

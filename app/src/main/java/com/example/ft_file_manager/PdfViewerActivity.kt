@@ -66,11 +66,8 @@ class PdfViewerActivity : AppCompatActivity() {
         override fun onBindViewHolder(holder: PdfViewHolder, position: Int) {
             val page = renderer.openPage(position)
 
-            // Δημιουργούμε το Bitmap για τη σελίδα
-            // Χρησιμοποιούμε bitmapConfig ARGB_8888 για ποιότητα
+            // Αυξάνουμε λίγο την ανάλυση για να φαίνεται καθαρά στο zoom
             val bitmap = Bitmap.createBitmap(page.width * 2, page.height * 2, Bitmap.Config.ARGB_8888)
-
-            // Rendering της σελίδας στο bitmap
             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
 
             holder.pageImage.setImageBitmap(bitmap)
