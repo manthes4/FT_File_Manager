@@ -1736,6 +1736,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        if (extension == "apk") {
+            openApk(file)
+            return
+        }
+
         // ΓΙΑ ΟΛΑ ΤΑ ΑΛΛΑ (APK, PDF, MP4 κλπ)
         val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "*/*"
         val prefs = getSharedPreferences("AppPreferences", MODE_PRIVATE)
@@ -1752,6 +1757,33 @@ class MainActivity : AppCompatActivity() {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             showOpenWithDecisionDialog(file, intent, mimeType)
+        }
+    }
+
+    private fun openApk(file: File) {
+        try {
+            val uri = FileProvider.getUriForFile(this, "${packageName}.provider", file)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            // Έλεγχος αν έχουμε άδεια για εγκατάσταση (για Android 8+)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                if (!packageManager.canRequestPackageInstalls()) {
+                    val manageIntent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                    startActivity(manageIntent)
+                    Toast.makeText(this, "Παρακαλώ δώστε την άδεια εγκατάστασης", Toast.LENGTH_LONG).show()
+                    return
+                }
+            }
+
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Αδυναμία έναρξης εγκατάστασης: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
