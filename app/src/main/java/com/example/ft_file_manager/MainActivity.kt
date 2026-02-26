@@ -986,9 +986,22 @@ class MainActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 val storageRoot = Environment.getExternalStorageDirectory().absolutePath
+                val isInsideVirtualZip = currentPath.absolutePath.contains(cacheDir.absolutePath)
+
+                // Αν είμαστε μέσα σε ZIP και το parent είναι ο φάκελος "virtual_contents",
+                // τότε το επόμενο "πίσω" πρέπει να μας βγάλει στην κανονική μνήμη.
+                if (isInsideVirtualZip && (currentPath.parentFile?.name == "virtual_contents" || currentPath.name == "virtual_contents")) {
+                    currentPath = Environment.getExternalStorageDirectory()
+                    loadFiles(currentPath)
+                    supportActionBar?.title = "FT File Manager" // Επαναφορά τίτλου
+                    return
+                }
+
+                // Η κανονική σου λογική για την πλοήγηση στους φακέλους
                 if (currentPath.absolutePath != storageRoot && currentPath.absolutePath != "/" && currentPath.parentFile != null) {
                     loadFiles(currentPath.parentFile!!)
                 } else {
+                    // Αν είμαστε στο Root της μνήμης, κλείσε την εφαρμογή
                     isEnabled = false
                     onBackPressedDispatcher.onBackPressed()
                 }
@@ -1791,11 +1804,9 @@ class MainActivity : AppCompatActivity() {
                 startActivity(intent)
                 return
             }
-            // Μέσα στην openFile της MainActivity
             "zip", "rar", "7z" -> {
-                val intent = Intent(this, ZipActivity::class.java)
-                intent.putExtra("PATH", file.absolutePath)
-                startActivity(intent)
+                // Αντί για Intent, "ανοίγουμε" το ZIP ως εικονικό φάκελο
+                prepareVirtualFolder(file)
                 return
             }
             "mp4", "mkv", "3gp", "webm" -> {
@@ -2057,6 +2068,49 @@ class MainActivity : AppCompatActivity() {
                 tempDir.deleteRecursively() // Καθαρισμός αν αποτύχει
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MainActivity, "Αποτυχία: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun prepareVirtualFolder(zipFile: File) {
+        // Δημιουργούμε έναν φάκελο "virtual" μέσα στα προσωρινά αρχεία της εφαρμογής
+        val virtualRoot = File(cacheDir, "virtual_contents/${zipFile.nameWithoutExtension}")
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // 1. Καθαρισμός προηγούμενων εικονικών περιηγήσεων
+                if (virtualRoot.exists()) virtualRoot.deleteRecursively()
+                virtualRoot.mkdirs()
+
+                // 2. Γρήγορη αποσυμπίεση στην Cache
+                ZipInputStream(BufferedInputStream(FileInputStream(zipFile))).use { zis ->
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        val newFile = File(virtualRoot, entry.name)
+                        if (entry.isDirectory) {
+                            newFile.mkdirs()
+                        } else {
+                            newFile.parentFile?.mkdirs()
+                            FileOutputStream(newFile).use { zis.copyTo(it) }
+                        }
+                        zis.closeEntry()
+                        entry = zis.nextEntry
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    // Αντί για currentPath = virtualRoot.absolutePath
+                    currentPath = virtualRoot
+                    loadFiles(currentPath)
+
+                    supportActionBar?.title = "Περιήγηση: ${zipFile.name}"
+                    Toast.makeText(this@MainActivity, "Εικονική περιήγηση ZIP", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Log.e("VIRTUAL_ZIP", "Error: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Αποτυχία ανοίγματος ZIP", Toast.LENGTH_SHORT).show()
                 }
             }
         }
