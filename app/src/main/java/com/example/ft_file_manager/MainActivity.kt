@@ -1728,6 +1728,12 @@ class MainActivity : AppCompatActivity() {
                 startActivity(intent)
                 return
             }
+            "mp4", "mkv", "3gp", "webm" -> {
+                val intent = Intent(this, VideoPlayerActivity::class.java)
+                intent.putExtra("PATH", file.absolutePath)
+                startActivity(intent)
+                return
+            }
             "jpg", "jpeg", "png", "gif", "webp" -> {
                 val intent = Intent(this, ImageViewActivity::class.java)
                 intent.putExtra("PATH", file.absolutePath)

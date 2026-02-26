@@ -71,6 +71,11 @@
             android:label="FTP Connection"
             android:exported="false" />
 
+        <activity
+            android:name=".VideoPlayerActivity"
+            android:configChanges="orientation|screenSize|layoutDirection"
+            android:theme="@style/Theme.AppCompat.DayNight.NoActionBar" />
+
     </application>
 
     <queries>
