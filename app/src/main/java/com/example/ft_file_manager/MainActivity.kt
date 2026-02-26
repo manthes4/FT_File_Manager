@@ -33,6 +33,7 @@ import kotlinx.coroutines.*
 import java.util.Collections
 import kotlin.jvm.java
 import androidx.lifecycle.lifecycleScope
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.bumptech.glide.Glide
 import com.bumptech.glide.RequestBuilder
 import com.bumptech.glide.load.engine.DiskCacheStrategy
@@ -73,6 +74,19 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         com.bumptech.glide.Glide.get(this).setMemoryCategory(com.bumptech.glide.MemoryCategory.HIGH)
+
+        // Μέσα στην onCreate της MainActivity
+        val swipeRefreshLayout = findViewById<SwipeRefreshLayout>(R.id.swipeRefreshLayout)
+
+        swipeRefreshLayout.setOnRefreshListener {
+            // Καλούμε τη συνάρτηση που ήδη έχεις για να ξαναφορτώσει τα αρχεία
+            loadFiles(currentPath)
+
+            // Σταματάμε το animation της ανανέωσης
+            swipeRefreshLayout.isRefreshing = false
+
+            Toast.makeText(this, "Ανανέωση φακέλου", Toast.LENGTH_SHORT).show()
+        }
 
         // Μέσα στο onCreate
         val prefs = getSharedPreferences("favorites", MODE_PRIVATE)

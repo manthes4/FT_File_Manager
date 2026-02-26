@@ -116,4 +116,6 @@ dependencies {
     kapt("androidx.room:room-compiler:$room_version")
 
     implementation("com.github.chrisbanes:PhotoView:2.3.0")
+
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.2.0")
 }
