@@ -2,6 +2,7 @@ package com.example.ft_file_manager
 
 import android.content.ClipData
 import android.content.Intent
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -39,6 +40,13 @@ import com.bumptech.glide.signature.ObjectKey
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import com.jcraft.jsch.ChannelSftp
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -274,6 +282,60 @@ class MainActivity : AppCompatActivity() {
                     true
                 }
 
+                R.id.action_zip -> {
+                    if (selectedFiles.isNotEmpty()) {
+                        val firstFile = File(selectedFiles[0].path)
+                        val parentDir = firstFile.parentFile ?: File("/storage/emulated/0/Download")
+                        val zipFile = File(parentDir, "${firstFile.nameWithoutExtension}.zip")
+
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            try {
+                                val firstFile = File(selectedFiles[0].path)
+                                val finalZip = File(firstFile.parentFile, "${firstFile.nameWithoutExtension}.zip")
+
+                                // Δημιουργούμε ένα προσωρινό αρχείο
+                                val tempZip = File(firstFile.parentFile, "temp_${System.currentTimeMillis()}.zip")
+
+                                FileOutputStream(tempZip).use { fos ->
+                                    ZipOutputStream(BufferedOutputStream(fos)).use { zos ->
+                                        selectedFiles.forEach { model ->
+                                            addToZip(File(model.path), zos, "")
+                                        }
+                                    }
+                                }
+
+                                // Αν υπάρχει το παλιό, το σβήνουμε τώρα
+                                if (finalZip.exists()) finalZip.delete()
+
+                                // Μετονομασία του temp στο τελικό
+                                val success = tempZip.renameTo(finalZip)
+                                Log.d("ZIP_LOG", "Rename success: $success")
+
+                                // Ενημέρωση συστήματος για να "δει" το νέο αρχείο
+                                MediaScannerConnection.scanFile(this@MainActivity, arrayOf(finalZip.absolutePath), null, null)
+
+                                withContext(Dispatchers.Main) {
+                                    loadFiles(currentPath)
+                                    exitSelectionMode()
+                                }
+                            } catch (e: Exception) {
+                                Log.e("ZIP_LOG", "ΣΦΑΛΜΑ: ${e.message}")
+                            }
+                        }
+                    }
+                    true
+                }
+
+                R.id.action_unzip -> {
+                    val selectedFile = File(selectedFiles[0].path)
+                    if (selectedFile.extension.lowercase() == "zip") {
+                        unzipDirectly(selectedFile)
+                    } else {
+                        Toast.makeText(this, "Επιλέξτε ένα αρχείο ZIP", Toast.LENGTH_SHORT).show()
+                    }
+                    true
+                }
+
                 else -> false
             }
         }
@@ -350,6 +412,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         // Φόρτωση ρυθμίσεων και ενημέρωση μενού
         loadFavoritesFromPrefs()
+        loadFiles(currentPath)
         updateDrawerMenu()
 
         // --- Η ΝΕΑ ΛΟΓΙΚΗ ΓΙΑ ΤΟ CONTAINER ---
@@ -1728,6 +1791,13 @@ class MainActivity : AppCompatActivity() {
                 startActivity(intent)
                 return
             }
+            // Μέσα στην openFile της MainActivity
+            "zip", "rar", "7z" -> {
+                val intent = Intent(this, ZipActivity::class.java)
+                intent.putExtra("PATH", file.absolutePath)
+                startActivity(intent)
+                return
+            }
             "mp4", "mkv", "3gp", "webm" -> {
                 val intent = Intent(this, VideoPlayerActivity::class.java)
                 intent.putExtra("PATH", file.absolutePath)
@@ -1908,6 +1978,88 @@ class MainActivity : AppCompatActivity() {
     private fun openPdfInternal(file: File) {
         // Προσωρινά τα στέλνουμε έξω μέχρι να φτιάξουμε τον δικό μας Viewer
         openFileExternally(file)
+    }
+
+    private fun addToZip(file: File, zos: ZipOutputStream, basePath: String) {
+        val entryName = if (basePath.isEmpty()) file.name else "$basePath/${file.name}"
+        if (file.isDirectory) {
+            file.listFiles()?.forEach { child ->
+                addToZip(child, zos, entryName)
+            }
+        } else {
+            val entry = ZipEntry(entryName)
+            zos.putNextEntry(entry)
+            file.inputStream().use { it.copyTo(zos) }
+            zos.closeEntry()
+        }
+    }
+
+    private fun unzipDirectly(zipFile: File) {
+        Log.d("ZIP_LOG", "--- ΕΝΑΡΞΗ ΑΠΟΣΥΜΠΙΕΣΗΣ (Atomic Mode) ---")
+
+        val parentDir = zipFile.parentFile ?: return
+        val finalTargetDir = File(parentDir, zipFile.nameWithoutExtension)
+        // Δημιουργούμε έναν μοναδικό temp φάκελο
+        val tempDir = File(parentDir, "temp_unzip_${System.currentTimeMillis()}")
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // 1. Δημιουργία του temp φακέλου
+                if (!tempDir.mkdirs()) {
+                    Log.e("ZIP_LOG", "Αποτυχία δημιουργίας temp φακέλου")
+                    return@launch
+                }
+
+                // 2. Διαδικασία αποσυμπίεσης στον temp
+                ZipInputStream(BufferedInputStream(FileInputStream(zipFile))).use { zis ->
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        val newFile = File(tempDir, entry.name)
+
+                        if (entry.isDirectory) {
+                            newFile.mkdirs()
+                        } else {
+                            // Εξασφάλιση γονικών φακέλων εντός του ZIP
+                            newFile.parentFile?.mkdirs()
+
+                            FileOutputStream(newFile).use { fos ->
+                                zis.copyTo(fos)
+                            }
+                        }
+                        zis.closeEntry()
+                        entry = zis.nextEntry
+                    }
+                }
+
+                // 3. Αν όλα πήγαν καλά, διαγράφουμε τον παλιό φάκελο (αν υπάρχει)
+                if (finalTargetDir.exists()) {
+                    Log.d("ZIP_LOG", "Διαγραφή παλιού φακέλου...")
+                    finalTargetDir.deleteRecursively()
+                    delay(100) // Μικρή παύση για το File System sync
+                }
+
+                // 4. Μετονομασία του temp στον τελικό φάκελο
+                val success = tempDir.renameTo(finalTargetDir)
+                Log.d("ZIP_LOG", "Rename target folder success: $success")
+
+                // 5. Ενημέρωση MediaScanner για όλα τα αρχεία που βγήκαν
+                val extractedFiles = finalTargetDir.walkTopDown().map { it.absolutePath }.toList().toTypedArray()
+                MediaScannerConnection.scanFile(this@MainActivity, extractedFiles, null, null)
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Αποσυμπιέστηκε επιτυχώς!", Toast.LENGTH_SHORT).show()
+                    loadFiles(currentPath)
+                    exitSelectionMode()
+                }
+
+            } catch (e: Exception) {
+                Log.e("ZIP_LOG", "ΣΦΑΛΜΑ UNZIP: ${e.message}")
+                tempDir.deleteRecursively() // Καθαρισμός αν αποτύχει
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Αποτυχία: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     private fun resetDefaultApp() {

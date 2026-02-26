@@ -76,6 +76,11 @@
             android:configChanges="orientation|screenSize|layoutDirection"
             android:theme="@style/Theme.AppCompat.DayNight.NoActionBar" />
 
+        <activity
+            android:name=".ZipActivity"
+            android:label="Zip Viewer"
+            android:theme="@style/Theme.FTFileManager" />
+
     </application>
 
     <queries>

@@ -42,4 +42,16 @@
         android:title="Reset default app"
         android:icon="@android:drawable/ic_menu_revert"
         app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_zip"
+        android:title="Compress (Zip)"
+        android:icon="@android:drawable/ic_menu_save"
+        app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/action_unzip"
+        android:title="Extract Here"
+        android:icon="@android:drawable/ic_menu_upload"
+        app:showAsAction="ifRoom" />
 </menu>
