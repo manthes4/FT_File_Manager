@@ -4,7 +4,11 @@
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:padding="12dp"
-    android:background="?attr/selectableItemBackground"
+    android:focusable="true"
+    android:clickable="true"
+    android:focusableInTouchMode="false"
+    android:background="@drawable/focused_item_selector"
+    android:nextFocusRight="@id/btnNewFolder"
     android:gravity="center_vertical">
 
     <ImageView

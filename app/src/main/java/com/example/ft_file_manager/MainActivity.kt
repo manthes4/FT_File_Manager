@@ -160,11 +160,26 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
+        if (isAndroidTV()) {
+            binding.recyclerView.apply {
+                // Επιτρέπει στο RecyclerView να παίρνει το focus
+                isFocusable = true
+                isFocusableInTouchMode = false // Σημαντικό για TV
+                // Δίνει το focus στα περιεχόμενα (τα αρχεία)
+                descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+                // Κάνει την πλοήγηση πιο ομαλή
+                requestFocus()
+            }
+        }
+
         // Δίνει προτεραιότητα στο UI thread για πιο ομαλή κίνηση
         window.setFlags(
             android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
         )
+
+        binding.recyclerView.isFocusable = true
+        binding.recyclerView.isFocusableInTouchMode = false // Αυτό επιτρέπει στο D-pad να πάρει τον έλεγχο
 
         binding.toolbar.findViewById<ImageButton>(R.id.btnUp).setOnClickListener {
             val parent = currentPath.parentFile
@@ -575,6 +590,16 @@ class MainActivity : AppCompatActivity() {
             // Μόνο η ενημέρωση του Adapter γίνεται στο Main Thread
             fullFileList = fileList
             updateAdapter(fileList)
+
+            // ΠΡΟΣΘΕΣΕ ΑΥΤΟ ΕΔΩ:
+            if (isAndroidTV()) {
+                binding.recyclerView.post {
+                    // Αν η λίστα δεν είναι άδεια, δώσε το focus στο πρώτο στοιχείο
+                    if (fileList.isNotEmpty()) {
+                        binding.recyclerView.getChildAt(0)?.requestFocus()
+                    }
+                }
+            }
         }
     }
 
@@ -599,14 +624,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateAdapter(list: List<FileModel>) {
-        // Δημιουργούμε τον adapter και τον αποθηκεύουμε στη lateinit μεταβλητή της κλάσης
+        // Δημιουργούμε τον adapter
         adapter = FileAdapter(
             list,
             isInSelectionMode = isSelectionMode,
             onItemClick = { selectedFile ->
                 if (isSelectionMode) {
                     selectedFile.isSelected = !selectedFile.isSelected
-                    adapter.notifyDataSetChanged() // Χρήση της μεταβλητής πλέον
+                    adapter.notifyDataSetChanged()
                     val count = fullFileList.count { it.isSelected }
                     if (count == 0) exitSelectionMode()
                     else binding.toolbar.title = "$count επιλεγμένα"
@@ -633,6 +658,18 @@ class MainActivity : AppCompatActivity() {
 
         // Τώρα τον συνδέουμε με το UI
         binding.recyclerView.adapter = adapter
+
+        // --- ΔΙΟΡΘΩΣΗ ΓΙΑ ANDROID TV ---
+        if (isAndroidTV()) {
+            binding.recyclerView.post {
+                // Δίνουμε χρόνο στο RecyclerView να "καταλάβει" ότι άλλαξε ο adapter
+                // και ζητάμε focus στο πρώτο στοιχείο της λίστας
+                if (list.isNotEmpty()) {
+                    val firstChild = binding.recyclerView.getChildAt(0)
+                    firstChild?.requestFocus()
+                }
+            }
+        }
     }
 
     private fun showOptionsDialog(file: FileModel) {
@@ -2129,6 +2166,11 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun isAndroidTV(): Boolean {
+        val uiModeManager = getSystemService(UI_MODE_SERVICE) as android.app.UiModeManager
+        return uiModeManager.currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
     }
 
     private fun resetDefaultApp() {

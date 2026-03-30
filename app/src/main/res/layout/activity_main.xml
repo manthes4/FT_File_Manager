@@ -56,6 +56,8 @@
                 android:id="@+id/recyclerView"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
+                android:focusable="true"
+                android:nextFocusDown="@id/bottomBar"
                 android:background="#050923" />
 
         </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
@@ -147,9 +149,13 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                android:background="@drawable/focused_item_selector"
                 android:gravity="center"
-                android:orientation="vertical">
+                android:orientation="vertical"
+                android:focusable="true"
+                android:clickable="true"
+                android:nextFocusUp="@id/swipeRefreshLayout"
+                android:nextFocusLeft="@id/recyclerView">
                 <ImageView
                     android:layout_width="24dp"
                     android:layout_height="24dp"
@@ -170,9 +176,12 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                android:background="@drawable/focused_item_selector"
                 android:gravity="center"
-                android:orientation="vertical">
+                android:orientation="vertical"
+                android:focusable="true"
+                android:clickable="true"
+                android:nextFocusUp="@id/swipeRefreshLayout">
                 <ImageView
                     android:layout_width="24dp"
                     android:layout_height="24dp"
@@ -193,9 +202,12 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                android:background="@drawable/focused_item_selector"
                 android:gravity="center"
-                android:orientation="vertical">
+                android:orientation="vertical"
+                android:focusable="true"
+                android:clickable="true"
+                android:nextFocusUp="@id/swipeRefreshLayout">
                 <ImageView
                     android:layout_width="24dp"
                     android:layout_height="24dp"
@@ -216,9 +228,12 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                android:background="@drawable/focused_item_selector"
                 android:gravity="center"
-                android:orientation="vertical">
+                android:orientation="vertical"
+                android:focusable="true"
+                android:clickable="true"
+                android:nextFocusUp="@id/swipeRefreshLayout">
                 <ImageView
                     android:layout_width="24dp"
                     android:layout_height="24dp"
@@ -239,9 +254,12 @@
                 android:layout_width="0dp"
                 android:layout_height="match_parent"
                 android:layout_weight="1"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                android:background="@drawable/focused_item_selector"
                 android:gravity="center"
-                android:orientation="vertical">
+                android:orientation="vertical"
+                android:focusable="true"
+                android:clickable="true"
+                android:nextFocusUp="@id/swipeRefreshLayout">
                 <ImageView
                     android:layout_width="24dp"
                     android:layout_height="24dp"

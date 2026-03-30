@@ -140,9 +140,14 @@ class FileAdapter(
         }
 
         // 3. Selection UI
-        holder.itemView.setBackgroundColor(
-            if (fileModel.isSelected) Color.parseColor("#4D2196F3") else Color.TRANSPARENT
-        )
+        // 3. Selection UI (Διόρθωση για Android TV Focus)
+        if (fileModel.isSelected) {
+            // Χρώμα για όταν το αρχείο είναι επιλεγμένο (π.χ. με Select All)
+            holder.itemView.setBackgroundColor(Color.parseColor("#4D2196F3"))
+        } else {
+            // ΕΠΑΝΑΦΟΡΑ του Selector για να δουλεύει το Focus της τηλεόρασης
+            holder.itemView.setBackgroundResource(R.drawable.focused_item_selector)
+        }
 
         // 4. Click Listeners - ΜΟΝΟ ΑΥΤΑ ΤΑ ΔΥΟ ΧΡΕΙΑΖΟΝΤΑΙ
         holder.itemView.setOnLongClickListener {

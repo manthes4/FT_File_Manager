@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.StatFs
 import android.view.View
+import android.view.ViewGroup
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
@@ -81,28 +82,55 @@ class DashboardActivity : AppCompatActivity() {
         // 4. Ρύθμιση RecyclerView και LayoutManager
         recyclerView = findViewById(R.id.dashboardRecyclerView)
 
-        // Βάση 6: 2 μεγάλες κάρτες (3+3) ή 3 μικρές (2+2+2) ανά σειρά
+        // 1. Ορισμός LayoutManager (όπως τον έχεις)
         val layoutManager = GridLayoutManager(this, 6)
         layoutManager.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
             override fun getSpanSize(position: Int): Int {
-                // Αν είναι ο τίτλος (Header ID 10) πιάνει 6 στήλες, αλλιώς 3 ή 2
                 return when (adapter.getItemViewType(position)) {
-                    1 -> 3  // Storage
-                    10 -> 6 // Header
-                    else -> 2 // Pinned Favorites
+                    1 -> 3   // Storage (2 κάρτες ανά σειρά)
+                    10 -> 6  // Header (Ολόκληρη σειρά)
+                    else -> 2 // Pinned Favorites (3 κάρτες ανά σειρά)
                 }
             }
         }
         recyclerView.layoutManager = layoutManager
 
-        // 5. Αρχικοποίηση Adapter
+        // 2. Ρυθμίσεις για Android TV Focus
+        if (isAndroidTV()) {
+            recyclerView.isFocusable = true
+            recyclerView.isFocusableInTouchMode = false
+            recyclerView.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+
+            // Αφαιρέσαμε την προβληματική γραμμή - το focus θα δουλεύει τέλεια και χωρίς αυτήν!
+        }
+
+        // 3. Αρχικοποίηση Adapter
         adapter = DashboardAdapter(storageItems,
             { item -> onItemClick(item) },
             { item -> onLongClick(item) }
         )
         recyclerView.adapter = adapter
 
+        // 4. Αυτόματο focus στην πρώτη κάρτα (όχι στον τίτλο/header)
+        if (isAndroidTV()) {
+            recyclerView.post {
+                // Βρίσκουμε το πρώτο στοιχείο που δεν είναι Header (Type 10)
+                for (i in 0 until adapter.itemCount) {
+                    if (adapter.getItemViewType(i) != 10) {
+                        recyclerView.findViewHolderForAdapterPosition(i)?.itemView?.requestFocus()
+                        break
+                    }
+                }
+            }
+        }
+
         setupDrawerDragAndDrop()
+    }
+
+    // Μην ξεχάσεις τη βοηθητική συνάρτηση στο τέλος της Activity:
+    private fun isAndroidTV(): Boolean {
+        val uiModeManager = getSystemService(UI_MODE_SERVICE) as android.app.UiModeManager
+        return uiModeManager.currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
     }
 
     private fun updateDrawerMenu() {
