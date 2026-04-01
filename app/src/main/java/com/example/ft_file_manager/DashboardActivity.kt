@@ -19,6 +19,9 @@ import java.text.DecimalFormat
 import java.util.Collections
 import kotlin.math.log10
 import kotlin.math.pow
+import com.google.android.material.navigation.NavigationView
+import androidx.drawerlayout.widget.DrawerLayout
+import com.google.android.material.appbar.MaterialToolbar
 
 class DashboardActivity : AppCompatActivity() {
 
@@ -110,19 +113,6 @@ class DashboardActivity : AppCompatActivity() {
             { item -> onLongClick(item) }
         )
         recyclerView.adapter = adapter
-
-        // 4. Αυτόματο focus στην πρώτη κάρτα (όχι στον τίτλο/header)
-        if (isAndroidTV()) {
-            recyclerView.post {
-                // Βρίσκουμε το πρώτο στοιχείο που δεν είναι Header (Type 10)
-                for (i in 0 until adapter.itemCount) {
-                    if (adapter.getItemViewType(i) != 10) {
-                        recyclerView.findViewHolderForAdapterPosition(i)?.itemView?.requestFocus()
-                        break
-                    }
-                }
-            }
-        }
 
         setupDrawerDragAndDrop()
     }
@@ -379,6 +369,15 @@ class DashboardActivity : AppCompatActivity() {
         storageItems.forEach { updateSpaceInfo(it) }
 
         adapter.notifyDataSetChanged()
+
+// ΠΡΟΣΘΕΣΕ ΤΟ ΕΔΩ: Μόλις γεμίσει η λίστα, δώσε focus στην 1η κάρτα
+        if (isAndroidTV()) {
+            recyclerView.post {
+                if (storageItems.isNotEmpty()) {
+                    recyclerView.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus()
+                }
+            }
+        }
     }
 
     private fun openPath(path: String) {

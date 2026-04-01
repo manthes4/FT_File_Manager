@@ -9,17 +9,24 @@
         android:id="@+id/breadcrumbName"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:padding="4dp"
+        android:padding="6dp"
         android:text="Folder"
         android:textColor="@android:color/white"
         android:textSize="16sp"
         android:textStyle="bold"
-        android:background="?attr/selectableItemBackgroundBorderless" />
+
+        android:focusable="true"
+        android:clickable="true"
+        android:focusableInTouchMode="false"
+        android:background="@drawable/focused_item_selector" />
 
     <ImageView
         android:id="@+id/breadcrumbArrow"
-        android:layout_width="8dp"
-        android:layout_height="8dp"
-        android:src="@android:drawable/radiobutton_off_background"
+        android:layout_width="12dp"
+        android:layout_height="12dp"
+        android:layout_marginStart="4dp"
+        android:layout_marginEnd="4dp"
+        android:src="@drawable/ic_chevron_right"
+        android:tint="#80FFFFFF"
         android:background="@android:color/transparent" />
 </LinearLayout>

@@ -23,19 +23,19 @@ class DashboardAdapter(
         return if (items[position].id == 5) TYPE_PINNED else TYPE_STORAGE
     }
 
-    // ViewHolder για τις μεγάλες κάρτες (Storage)
     class StorageViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val container: View = view.findViewById(R.id.cardContainer) // Προσθήκη
         val icon: ImageView = view.findViewById(R.id.itemIcon)
         val title: TextView = view.findViewById(R.id.itemTitle)
         val progress: ProgressBar = view.findViewById(R.id.itemProgress)
         val details: TextView = view.findViewById(R.id.itemSpaceDetails)
     }
 
-    // ViewHolder για τις μικρές κάρτες (Pinned/Favorites)
     class PinnedViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val container: View = view.findViewById(R.id.cardContainer) // Προσθήκη
         val icon: ImageView = view.findViewById(R.id.itemIcon)
         val title: TextView = view.findViewById(R.id.itemTitle)
-        val size: TextView = view.findViewById(R.id.itemSize) // Υποθέτοντας ότι το ονομάσαμε itemSize στο XML
+        val size: TextView = view.findViewById(R.id.itemSize)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
@@ -51,23 +51,26 @@ class DashboardAdapter(
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         val item = items[position]
 
+        // Πάρε το σωστό container ανάλογα τον τύπο του ViewHolder
+        val targetView = if (holder is StorageViewHolder) holder.container else (holder as PinnedViewHolder).container
+
         if (holder is StorageViewHolder) {
             holder.title.text = item.title
             holder.icon.setImageResource(item.iconRes)
             holder.progress.progress = item.percentage
             holder.details.text = "${item.usedSpace} / ${item.totalSpace}"
-        }
-        else if (holder is PinnedViewHolder) {
+        } else if (holder is PinnedViewHolder) {
             holder.title.text = item.title
             holder.icon.setImageResource(item.iconRes)
-            // Στο μικρό layout δείχνουμε μόνο το used space ή "N/A"
             holder.size.text = item.usedSpace ?: ""
         }
 
-        // Κοινή λογική για τα κλικ
-        holder.itemView.setOnClickListener { onClick(item) }
+        // --- Η ΔΙΟΡΘΩΣΗ: Ακούμε τα κλικ στο σωστό View ---
+        targetView.setOnClickListener {
+            onClick(item)
+        }
 
-        holder.itemView.setOnLongClickListener {
+        targetView.setOnLongClickListener {
             onLongClick(item)
             true
         }
