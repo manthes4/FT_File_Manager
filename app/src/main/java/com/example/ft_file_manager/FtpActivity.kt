@@ -70,33 +70,36 @@ class FtpActivity : AppCompatActivity() {
         // 1. Σύνδεση κουμπιού Σάρωσης IP
         binding.btnScanIp.setOnClickListener {
             scanLocalNetworkForFtp { foundIp ->
-                // Αυτό καλείται αυτόματα όταν επιλέξεις μια IP από τη λίστα
                 Toast.makeText(this, "Επιλέχθηκε η IP: $foundIp", Toast.LENGTH_SHORT).show()
             }
         }
 
-// 2. Σύνδεση κουμπιού Upload
+        // 2. Σύνδεση κουμπιού Upload / Paste
+        if (TransferManager.filesToMove.isNotEmpty()) {
+            binding.btnUpload.visibility = View.VISIBLE
+        }
+
+// Κουμπί Upload / Paste
         binding.btnUpload.setOnClickListener {
-            // Ανοίγει τον file picker του κινητού για να διαλέξεις αρχείο
-            filePickerLauncher.launch("*/*")
+            if (TransferManager.filesToMove.isNotEmpty()) {
+                executeFtpPaste() // Αν υπάρχουν αρχεία, κάνε επικόλληση!
+            } else {
+                filePickerLauncher.launch("*/*") // Αλλιώς, άνοιξε τον file picker για απλό upload
+            }
         }
 
         // --- ΛΕΙΤΟΥΡΓΙΑ SERVER (Το δικό μου κινητό) ---
 
-        // Φόρτωση προεπιλεγμένων στοιχείων για τον δικό σου Server (προαιρετικά από prefs)
         val lastServerUser = prefs.getString("server_user", "admin")
         val lastServerPass = prefs.getString("server_pass", "1234")
         binding.etServerUser.setText(lastServerUser)
         binding.etServerPass.setText(lastServerPass)
 
-        // --- Εμφάνιση IP με το που ανοίγει η οθόνη ---
         val ip = getWifiIPAddress()
         binding.tvServerInfo.text = "Η IP σου: $ip\n(Port: 2121)"
 
-        // Κουμπί Έναρξης/Διακοπής Server
         binding.btnStartServer.setOnClickListener {
             if (ftpServer == null) {
-                // Αποθήκευση των στοιχείων που όρισες για τον server
                 prefs.edit().apply {
                     putString("server_user", binding.etServerUser.text.toString())
                     putString("server_pass", binding.etServerPass.text.toString())
@@ -106,6 +109,32 @@ class FtpActivity : AppCompatActivity() {
             } else {
                 stopFtpServer()
             }
+        }
+
+// ==========================================
+        // ΑΥΤΟΜΑΤΗ ΣΥΝΔΕΣΗ ΜΕ ΤΟΥΣ ΠΟΥ ΑΝΟΙΓΕΙ Η ΟΘΟΝΗ
+        // ==========================================
+        if (!targetHost.isNullOrEmpty()) {
+            // Αν έρθαμε από το Dashboard, παίρνουμε τα αποθηκευμένα lastUser και lastPass
+            val userToLogin = lastUser ?: ""
+            val passToLogin = lastPass ?: ""
+
+            // Καλούμε απευθείας τη σύνδεση
+            connectToFtp(targetHost, userToLogin, passToLogin)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+
+        android.util.Log.d("TRANSFER_DEBUG", "onResume called in FtpActivity. Files count: ${TransferManager.filesToMove.size}")
+
+        if (TransferManager.filesToMove.isNotEmpty()) {
+            binding.btnUpload.visibility = View.VISIBLE
+            android.util.Log.d("TRANSFER_DEBUG", "FORCING btnUpload to VISIBLE")
+        } else {
+            binding.btnUpload.visibility = View.GONE
+            android.util.Log.d("TRANSFER_DEBUG", "Hiding btnUpload (Manager is empty)")
         }
     }
 
@@ -130,12 +159,10 @@ class FtpActivity : AppCompatActivity() {
                         binding.cardServer.visibility = View.GONE
                         binding.ftpRecyclerView.visibility = View.VISIBLE
 
-                        // --- ΕΔΩ ΕΜΦΑΝΙΖΕΤΑΙ ΤΟ ΚΟΥΜΠΙ UPLOAD ---
-                        binding.btnUpload.visibility = View.VISIBLE
+                        // --- ΚΑΛΟΥΜΕ ΕΔΩ ΤΟΝ ΕΛΕΓΧΟ ΓΙΑ ΤΟ PASTE ---
+                        updatePasteButtonVisibility()
 
                         loadFtpFiles("/")
-
-                        // ΕΔΩ ΚΑΛΟΥΜΕ ΤΗΝ ΕΡΩΤΗΣΗ
                         askToSaveFavorite(host)
                     }
                 } else {
@@ -155,6 +182,29 @@ class FtpActivity : AppCompatActivity() {
                 }
             }
         }.start()
+    }
+
+    private fun updatePasteButtonVisibility() {
+        val count = TransferManager.filesToMove.size
+
+        if (count > 0) {
+            // 1. Υπάρχουν αρχεία στη μνήμη -> ΑΛΛΑΓΗ ΣΕ ΕΙΚΟΝΙΔΙΟ ΕΠΙΚΟΛΛΗΣΗΣ (PASTE)
+            binding.btnUpload.setImageResource(android.R.drawable.ic_menu_agenda) // ή το δικό σου ic_menu_paste / ic_content_paste
+
+            // Προαιρετικά: Αλλάζεις το Content Description για προσβασιμότητα/Android TV
+            binding.btnUpload.contentDescription = "Επικόλληση ($count)"
+
+            // Εξασφαλίζουμε ότι είναι ορατό
+            binding.btnUpload.visibility = View.VISIBLE
+        } else {
+            // 2. Δεν υπάρχουν αρχεία -> ΕΠΑΝΑΦΟΡΑ ΣΕ ΕΙΚΟΝΙΔΙΟ ΑΝΕΒΑΣΜΑΤΟΣ (UPLOAD)
+            binding.btnUpload.setImageResource(android.R.drawable.ic_menu_upload) // ή το δικό σου εικονίδιο upload
+
+            binding.btnUpload.contentDescription = "Ανέβασμα Αρχείου"
+
+            // Εδώ επιλέγεις αν θα φαίνεται πάντα για Upload ή αν θα κρύβεται
+            binding.btnUpload.visibility = View.VISIBLE
+        }
     }
 
     private fun loadFtpFiles(path: String) {
@@ -208,6 +258,8 @@ class FtpActivity : AppCompatActivity() {
                 fileList.sortWith(compareByDescending<FileModel> { it.isDirectory }.thenBy { it.name.lowercase() })
 
                 runOnUiThread {
+                    // --- ΚΑΛΟΥΜΕ ΚΑΙ ΕΔΩ ΓΙΑ ΝΑ ΜΗΝ ΧΑΝΕΤΑΙ ΤΟ ΚΟΥΜΠΙ ΣΕ ΦΑΚΕΛΟΥΣ ---
+                    updatePasteButtonVisibility()
                     binding.ftpRecyclerView.adapter = FileAdapter(
                         files = fileList,
                         isInSelectionMode = false,
@@ -448,6 +500,98 @@ class FtpActivity : AppCompatActivity() {
             name = uri.path?.substringAfterLast('/')
         }
         return name
+    }
+
+    private fun executeFtpPaste() {
+        val progressDialog = android.app.ProgressDialog(this)
+        progressDialog.setMessage("Μεταφορά αρχείων στον FTP...")
+        progressDialog.setCancelable(false)
+        progressDialog.show()
+
+        Thread {
+            var allSuccess = true
+            try {
+                ftpClient.setFileType(org.apache.commons.net.ftp.FTP.BINARY_FILE_TYPE)
+
+                TransferManager.filesToMove.forEach { model ->
+                    val localFile = java.io.File(model.path)
+                    if (localFile.exists()) {
+                        val remotePath = if (currentFtpPath == "/") "/${localFile.name}" else "$currentFtpPath/${localFile.name}"
+
+                        val inputStream = java.io.FileInputStream(localFile)
+                        val success = ftpClient.storeFile(remotePath, inputStream)
+                        inputStream.close()
+
+                        if (!success) {
+                            allSuccess = false
+                        } else if (TransferManager.isCut) {
+                            // Αν ήταν Cut (Αποκοπή), διαγράφουμε το τοπικό αρχείο
+                            localFile.delete()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                allSuccess = false
+            }
+
+            runOnUiThread {
+                progressDialog.dismiss()
+                if (allSuccess) {
+                    Toast.makeText(this, "Η επικόλληση στον FTP ολοκληρώθηκε!", Toast.LENGTH_SHORT).show()
+                    // Καθαρισμός της μνήμης μεταφοράς
+                    TransferManager.filesToMove = emptyList()
+                    // Ανανέωση λίστας FTP
+                    loadFtpFiles(currentFtpPath)
+                } else {
+                    Toast.makeText(this, "Κάποια αρχεία απέτυχαν κατά την επικόλληση", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    // Μια συνάρτηση αυτόματης σύνδεσης για τα Pinned items
+    private fun connectToFtpAutomatically(host: String, user: String, pass: String) {
+        val pd = android.app.ProgressDialog(this)
+        pd.setMessage("Αυτόματη σύνδεση στο $host...")
+        pd.show()
+
+        Thread {
+            try {
+                ftpClient.connect(host, 21)
+                val loginSuccess = ftpClient.login(user, pass)
+
+                if (loginSuccess) {
+                    ftpClient.enterLocalPassiveMode()
+                    ftpClient.setFileType(org.apache.commons.net.ftp.FTP.BINARY_FILE_TYPE)
+
+                    runOnUiThread {
+                        pd.dismiss()
+                        binding.cardClient.visibility = View.GONE
+                        binding.cardServer.visibility = View.GONE
+                        binding.ftpRecyclerView.visibility = View.VISIBLE
+
+                        // Εμφάνιση κουμπιού upload/paste αν υπάρχουν αρχεία στη μνήμη
+                        if (TransferManager.filesToMove.isNotEmpty()) {
+                            binding.btnUpload.visibility = View.VISIBLE
+                        }
+
+                        // ΣΩΣΤΟ: Ξεκινάμε πάντα από το root "/" και όχι από λάθος URL!
+                        loadFtpFiles("/")
+                    }
+                } else {
+                    runOnUiThread {
+                        pd.dismiss()
+                        Toast.makeText(this, "Απέτυχε η αυτόματη σύνδεση (Λάθος στοιχεία)", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    pd.dismiss()
+                    Toast.makeText(this, "Σφάλμα: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
     }
 
     private fun getWifiIPAddress(): String {
