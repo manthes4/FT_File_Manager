@@ -82,9 +82,10 @@ class FtpActivity : AppCompatActivity() {
 // Κουμπί Upload / Paste
         binding.btnUpload.setOnClickListener {
             if (TransferManager.filesToMove.isNotEmpty()) {
-                executeFtpPaste() // Αν υπάρχουν αρχεία, κάνε επικόλληση!
+                // Ελέγχουμε αν πρόκειται για FTP μεταφορά
+                executeFtpPaste()
             } else {
-                filePickerLauncher.launch("*/*") // Αλλιώς, άνοιξε τον file picker για απλό upload
+                filePickerLauncher.launch("*/*")
             }
         }
 
@@ -205,21 +206,21 @@ class FtpActivity : AppCompatActivity() {
         val count = TransferManager.filesToMove.size
 
         if (count > 0) {
-            // 1. Υπάρχουν αρχεία στη μνήμη -> ΑΛΛΑΓΗ ΣΕ ΕΙΚΟΝΙΔΙΟ ΕΠΙΚΟΛΛΗΣΗΣ (PASTE)
-            binding.btnUpload.setImageResource(android.R.drawable.ic_menu_agenda) // ή το δικό σου ic_menu_paste / ic_content_paste
-
-            // Προαιρετικά: Αλλάζεις το Content Description για προσβασιμότητα/Android TV
-            binding.btnUpload.contentDescription = "Επικόλληση ($count)"
-
-            // Εξασφαλίζουμε ότι είναι ορατό
+            // Υπάρχουν αρχεία στη μνήμη για μεταφορά/επικόλληση
+            if (TransferManager.sourceIsFtp) {
+                // ΠΕΡΙΠΤΩΣΗ Α: Έρχονται ΑΠΟ ΤΟΝ FTP (Άρα κάνουμε Λήψη / Download τοπικά)
+                binding.btnUpload.setImageResource(android.R.drawable.stat_sys_download) // Ή το δικό σου custom ic_download
+                binding.btnUpload.contentDescription = "Λήψη αρχείου από FTP ($count)"
+            } else {
+                // ΠΕΡΙΠΤΩΣΗ Β: Έρχονται από αλλού (π.χ. Τοπικά) και τα ανεβάζουμε στον FTP (Upload)
+                binding.btnUpload.setImageResource(android.R.drawable.stat_sys_upload) // Ή το δικό σου custom ic_upload
+                binding.btnUpload.contentDescription = "Ανέβασμα αρχείου στον FTP ($count)"
+            }
             binding.btnUpload.visibility = View.VISIBLE
         } else {
-            // 2. Δεν υπάρχουν αρχεία -> ΕΠΑΝΑΦΟΡΑ ΣΕ ΕΙΚΟΝΙΔΙΟ ΑΝΕΒΑΣΜΑΤΟΣ (UPLOAD)
-            binding.btnUpload.setImageResource(android.R.drawable.ic_menu_upload) // ή το δικό σου εικονίδιο upload
-
-            binding.btnUpload.contentDescription = "Ανέβασμα Αρχείου"
-
-            // Εδώ επιλέγεις αν θα φαίνεται πάντα για Upload ή αν θα κρύβεται
+            // ΠΕΡΙΠΤΩΣΗ Γ: Καμία ενέργεια / άδειος TransferManager -> Απλό εικονίδιο Upload για επιλογή αρχείου
+            binding.btnUpload.setImageResource(android.R.drawable.ic_menu_upload)
+            binding.btnUpload.contentDescription = "Επιλογή αρχείου για ανέβασμα"
             binding.btnUpload.visibility = View.VISIBLE
         }
     }
@@ -500,6 +501,9 @@ class FtpActivity : AppCompatActivity() {
     private fun prepareCut(fileModel: FileModel) {
         TransferManager.filesToMove = listOf(fileModel)
         TransferManager.isCut = true
+        TransferManager.sourceIsFtp = true  // <-- Ορίζουμε ότι η πηγή είναι FTP
+        TransferManager.sourceIsSmb = false
+        TransferManager.sourceIsSftp = false
 
         Toast.makeText(this, "Επιλέχθηκε για αποκοπή: ${fileModel.name}", Toast.LENGTH_SHORT).show()
 
@@ -659,7 +663,7 @@ class FtpActivity : AppCompatActivity() {
 
     private fun executeFtpPaste() {
         val progressDialog = android.app.ProgressDialog(this).apply {
-            setMessage("Μεταφορά αρχείων στον FTP...")
+            setMessage("Εκτέλεση επικόλλησης στον FTP...")
             setCancelable(false)
             show()
         }
@@ -671,69 +675,75 @@ class FtpActivity : AppCompatActivity() {
                 ftpClient.setFileType(org.apache.commons.net.ftp.FTP.BINARY_FILE_TYPE)
                 ftpClient.enterLocalPassiveMode()
 
-                // Παίρνουμε μια φορά τη λίστα των αρχείων του τρέχοντος φακέλου για τον έλεγχο διπλότυπων
-                val existingFiles = ftpClient.listFiles().map { it.name }.toSet()
-                val currentFolderFiles = existingFiles.toMutableSet()
-
                 TransferManager.filesToMove.forEach { model ->
-                    val localFile = java.io.File(model.path)
-                    if (localFile.exists()) {
-                        val originalName = localFile.name
-                        val targetDir = if (currentFtpPath.endsWith("/")) currentFtpPath else "$currentFtpPath/"
+                    // ΕΛΕΓΧΟΣ: Αν προέρχεται από FTP (Download προς συσκευή)
+                    if (TransferManager.sourceIsFtp) {
+                        val localDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                        if (!localDir.exists()) localDir.mkdirs()
 
-                        val cacheFile = java.io.File(cacheDir, "ftp_temp_$originalName")
-                        localFile.copyTo(cacheFile, overwrite = true)
-
-                        var uploadSuccess = false
-                        var targetRemoteName = originalName
-
-                        // --- ΒΗΜΑ 1: Καθαρισμός ονόματος εξ αρχής (για να φεύγουν πάντα underscores, παρενθέσεις, παύλες) ---
-                        val extension = originalName.substringAfterLast('.', "")
-                        val nameWithoutExt = originalName.substringBeforeLast('.', originalName)
-
-                        var cleanBaseName = nameWithoutExt.substringBefore("_")
-                        cleanBaseName = cleanBaseName.replace("(", "").replace(")", "").replace("-", "").trim()
-                        if (cleanBaseName.isEmpty()) cleanBaseName = "file"
-
-                        targetRemoteName = if (extension.isNotEmpty()) "$cleanBaseName.$extension" else cleanBaseName
-
-                        // --- ΒΗΜΑ 2: Έλεγχος σύγκρουσης & Μοναδικότητας ΓΙΑ ΟΛΑ ΤΑ ΑΡΧΕΙΑ ---
+                        var localFile = java.io.File(localDir, model.name)
                         var counter = 1
-                        val baseWithoutExt = targetRemoteName.substringBeforeLast('.')
-                        val fileExt = targetRemoteName.substringAfterLast('.', "")
-
-                        var finalRemoteName = targetRemoteName
-                        while (currentFolderFiles.contains(finalRemoteName)) {
-                            finalRemoteName = if (fileExt.isNotEmpty()) {
-                                "$baseWithoutExt$counter.$fileExt"
-                            } else {
-                                "$baseWithoutExt$counter"
-                            }
+                        val extension = model.name.substringAfterLast('.', "")
+                        val nameWithoutExt = model.name.substringBeforeLast('.', model.name)
+                        while (localFile.exists()) {
+                            val newName = if (extension.isNotEmpty()) "$nameWithoutExt($counter).$extension" else "$nameWithoutExt($counter)"
+                            localFile = java.io.File(localDir, newName)
                             counter++
                         }
 
-                        targetRemoteName = finalRemoteName
-                        val remotePath = if (targetDir == "/") "/$targetRemoteName" else "$targetDir$targetRemoteName"
-
-                        android.util.Log.w("FTP_PASTE", "Τελικό ασφαλές & μοναδικό όνομα προς αποστολή: $targetRemoteName")
-
-                        // --- ΒΗΜΑ 3: Αποστολή αρχείου ---
-                        java.io.FileInputStream(cacheFile).use { inputStream ->
-                            uploadSuccess = ftpClient.storeFile(remotePath, inputStream)
+                        var downloadSuccess = false
+                        java.io.FileOutputStream(localFile).use { outputStream ->
+                            downloadSuccess = ftpClient.retrieveFile(model.path, outputStream)
                         }
 
-                        if (uploadSuccess) {
-                            // Προσθέτουμε το όνομα στη λίστα ώστε αν υπάρχει κι α bao παρόμοιο αρχείο στην ίδια παρτίδα, να πάρει επόμενο νούμερο
-                            currentFolderFiles.add(targetRemoteName)
+                        if (downloadSuccess) {
                             if (TransferManager.isCut) {
-                                localFile.delete()
+                                ftpClient.deleteFile(model.path)
                             }
                         } else {
                             allSuccess = false
-                            android.util.Log.e("FTP_PASTE", "Αποτυχία αποστολής για: $originalName ως $targetRemoteName")
                         }
 
-                        if (cacheFile.exists()) cacheFile.delete()
+                    } else {
+                        // ΑΛΛΙΩΣ: Προέρχεται από τη συσκευή και πάει ΠΡΟΣ ΤΟΝ FTP (Upload)
+                        val localFile = java.io.File(model.path)
+
+                        if (localFile.exists()) {
+                            val existingFiles = ftpClient.listFiles().map { it.name }.toSet()
+                            val targetDir = if (currentFtpPath.endsWith("/")) currentFtpPath else "$currentFtpPath/"
+
+                            val originalName = localFile.name
+                            val extension = originalName.substringAfterLast('.', "")
+                            val nameWithoutExt = originalName.substringBeforeLast('.', originalName)
+
+                            var finalRemoteName = originalName
+                            var counter = 1
+                            while (existingFiles.contains(finalRemoteName)) {
+                                finalRemoteName = if (extension.isNotEmpty()) {
+                                    "$nameWithoutExt($counter).$extension"
+                                } else {
+                                    "$nameWithoutExt($counter)"
+                                }
+                                counter++
+                            }
+
+                            val remotePath = if (targetDir == "/") "/$finalRemoteName" else "$targetDir$finalRemoteName"
+
+                            var uploadSuccess = false
+                            java.io.FileInputStream(localFile).use { inputStream ->
+                                uploadSuccess = ftpClient.storeFile(remotePath, inputStream)
+                            }
+
+                            if (uploadSuccess) {
+                                if (TransferManager.isCut) {
+                                    localFile.delete()
+                                }
+                            } else {
+                                allSuccess = false
+                            }
+                        } else {
+                            allSuccess = false
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -743,15 +753,16 @@ class FtpActivity : AppCompatActivity() {
 
             runOnUiThread {
                 progressDialog.dismiss()
+                TransferManager.filesToMove = emptyList()
+                updatePasteButtonVisibility()
+
                 if (allSuccess) {
-                    Toast.makeText(this, "Η επικόλληση ολοκληρώθηκε επιτυχώς!", Toast.LENGTH_SHORT).show()
-                    TransferManager.filesToMove = emptyList()
-                    updatePasteButtonVisibility()
-                    loadFtpFiles(currentFtpPath)
+                    Toast.makeText(this, "Η μεταφορά ολοκληρώθηκε επιτυχώς!", Toast.LENGTH_SHORT).show()
                 } else {
-                    Toast.makeText(this, "Κάποια αρχεία απέτυχαν τελικά", Toast.LENGTH_LONG).show()
-                    loadFtpFiles(currentFtpPath)
+                    Toast.makeText(this, "Κάποιο σφάλμα προέκυψε κατά τη μεταφορά.", Toast.LENGTH_LONG).show()
                 }
+
+                loadFtpFiles(currentFtpPath)
             }
         }.start()
     }

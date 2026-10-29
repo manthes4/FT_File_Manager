@@ -831,12 +831,20 @@ class MainActivity : AppCompatActivity() {
     private fun pasteFile() {
         Log.d("TRANSFER_DEBUG", "--- Paste Initiated ---")
         Log.d("TRANSFER_DEBUG", "Files to move count: ${TransferManager.filesToMove.size}")
-        Log.d("TRANSFER_DEBUG", "Protocol Flags -> SMB: ${TransferManager.sourceIsSmb}, SFTP: ${TransferManager.sourceIsSftp}")
+        Log.d("TRANSFER_DEBUG", "Protocol Flags -> SMB: ${TransferManager.sourceIsSmb}, SFTP: ${TransferManager.sourceIsSftp}, FTP: ${TransferManager.sourceIsFtp}")
 
-        // 1. Έλεγχος Δικτύου
+// 1. Έλεγχος Δικτύου (SMB, SFTP ή FTP)
+// 1. Έλεγχος Δικτύου (SMB, SFTP)
         if (TransferManager.filesToMove.isNotEmpty() && (TransferManager.sourceIsSmb || TransferManager.sourceIsSftp)) {
             Log.d("TRANSFER_DEBUG", "Redirecting to Network Download Flow")
             executeNetworkDownload()
+            return
+        }
+
+        // 2. Έλεγχος FTP -> Αν είμαστε σε FTP paste, δεν κάνουμε τοπικό mv εδώ!
+        if (TransferManager.filesToMove.isNotEmpty() && TransferManager.sourceIsFtp) {
+            Log.d("TRANSFER_DEBUG", "FTP paste detected in MainActivity. Bypassing local move.")
+            Toast.makeText(this, "Παρακαλώ κάντε επικόλληση μέσα από την οθόνη του FTP.", Toast.LENGTH_SHORT).show()
             return
         }
 

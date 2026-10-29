@@ -7,6 +7,7 @@ object TransferManager {
     // Πηγές (Προσθέσαμε το SFTP flag)
     var sourceIsSmb: Boolean = false
     var sourceIsSftp: Boolean = false
+    var sourceIsFtp: Boolean = false // <-- Πρόσθεσε αυτή τη γραμμή εδώ!
 
     // Στοιχεία σύνδεσης SMB
     var smbHost: String = ""
