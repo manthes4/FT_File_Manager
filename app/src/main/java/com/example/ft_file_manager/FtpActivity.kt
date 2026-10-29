@@ -533,8 +533,9 @@ class FtpActivity : AppCompatActivity() {
                 ftpClient.setFileType(org.apache.commons.net.ftp.FTP.BINARY_FILE_TYPE)
                 ftpClient.enterLocalPassiveMode()
 
-                // Παίρνουμε τη λίστα των αρχείων του τρέχοντος φακέλου για τον έλεγχο διπλότυπων
+                // Παίρνουμε μια φορά τη λίστα των αρχείων του τρέχοντος φακέλου για τον έλεγχο διπλότυπων
                 val existingFiles = ftpClient.listFiles().map { it.name }.toSet()
+                val currentFolderFiles = existingFiles.toMutableSet()
 
                 TransferManager.filesToMove.forEach { model ->
                     val localFile = java.io.File(model.path)
@@ -548,50 +549,50 @@ class FtpActivity : AppCompatActivity() {
                         var uploadSuccess = false
                         var targetRemoteName = originalName
 
-                        // --- 1. Δοκιμή με το αυθεντικό όνομα ---
-                        var primaryRemotePath = if (targetDir == "/") "/$targetRemoteName" else "$targetDir$targetRemoteName"
+                        // --- ΒΗΜΑ 1: Καθαρισμός ονόματος εξ αρχής (για να φεύγουν πάντα underscores, παρενθέσεις, παύλες) ---
+                        val extension = originalName.substringAfterLast('.', "")
+                        val nameWithoutExt = originalName.substringBeforeLast('.', originalName)
 
+                        var cleanBaseName = nameWithoutExt.substringBefore("_")
+                        cleanBaseName = cleanBaseName.replace("(", "").replace(")", "").replace("-", "").trim()
+                        if (cleanBaseName.isEmpty()) cleanBaseName = "file"
+
+                        targetRemoteName = if (extension.isNotEmpty()) "$cleanBaseName.$extension" else cleanBaseName
+
+                        // --- ΒΗΜΑ 2: Έλεγχος σύγκρουσης & Μοναδικότητας ΓΙΑ ΟΛΑ ΤΑ ΑΡΧΕΙΑ ---
+                        var counter = 1
+                        val baseWithoutExt = targetRemoteName.substringBeforeLast('.')
+                        val fileExt = targetRemoteName.substringAfterLast('.', "")
+
+                        var finalRemoteName = targetRemoteName
+                        while (currentFolderFiles.contains(finalRemoteName)) {
+                            finalRemoteName = if (fileExt.isNotEmpty()) {
+                                "$baseWithoutExt$counter.$fileExt"
+                            } else {
+                                "$baseWithoutExt$counter"
+                            }
+                            counter++
+                        }
+
+                        targetRemoteName = finalRemoteName
+                        val remotePath = if (targetDir == "/") "/$targetRemoteName" else "$targetDir$targetRemoteName"
+
+                        android.util.Log.w("FTP_PASTE", "Τελικό ασφαλές & μοναδικό όνομα προς αποστολή: $targetRemoteName")
+
+                        // --- ΒΗΜΑ 3: Αποστολή αρχείου ---
                         java.io.FileInputStream(cacheFile).use { inputStream ->
-                            uploadSuccess = ftpClient.storeFile(primaryRemotePath, inputStream)
+                            uploadSuccess = ftpClient.storeFile(remotePath, inputStream)
                         }
 
-                        // --- 2. Fallback αν αποτύχει (αφαίρεση underscore/ειδικών χαρακτήρων) ---
-                        if (!uploadSuccess) {
-                            val extension = originalName.substringAfterLast('.', "")
-                            val nameWithoutExt = originalName.substringBeforeLast('.')
-                            val cleanBaseName = nameWithoutExt.substringBefore("_")
-
-                            targetRemoteName = if (extension.isNotEmpty()) "$cleanBaseName.$extension" else cleanBaseName
-
-                            // --- 3. Έλεγχος σύγκρουσης ΧΩΡΙΣ κανέναν ειδικό χαρακτήρα (π.χ. 63584331.jpg, 63584332.jpg) ---
-                            var counter = 1
-                            val baseWithoutExt = targetRemoteName.substringBeforeLast('.')
-                            val fileExt = targetRemoteName.substringAfterLast('.', "")
-
-                            // Όταν υπάρχει ήδη το αρχείο, προσθέτουμε τον αριθμό κολλητά (χωρίς underscores ή παρενθέσεις)
-                            while (existingFiles.contains(targetRemoteName)) {
-                                targetRemoteName = if (fileExt.isNotEmpty()) {
-                                    "$baseWithoutExt$counter.$fileExt"
-                                } else {
-                                    "$baseWithoutExt$counter"
-                                }
-                                counter++
+                        if (uploadSuccess) {
+                            // Προσθέτουμε το όνομα στη λίστα ώστε αν υπάρχει κι α bao παρόμοιο αρχείο στην ίδια παρτίδα, να πάρει επόμενο νούμερο
+                            currentFolderFiles.add(targetRemoteName)
+                            if (TransferManager.isCut) {
+                                localFile.delete()
                             }
-
-                            val fallbackRemotePath = if (targetDir == "/") "/$targetRemoteName" else "$targetDir$targetRemoteName"
-
-                            android.util.Log.w("FTP_PASTE", "1η απέτυχε. Ασφαλές όνομα χωρίς ειδικούς χαρακτήρες: $targetRemoteName")
-
-                            java.io.FileInputStream(cacheFile).use { inputStream ->
-                                uploadSuccess = ftpClient.storeFile(fallbackRemotePath, inputStream)
-                            }
-                        }
-
-                        if (!uploadSuccess) {
+                        } else {
                             allSuccess = false
-                            android.util.Log.e("FTP_PASTE", "Οριστική αποτυχία για: $originalName")
-                        } else if (TransferManager.isCut) {
-                            localFile.delete()
+                            android.util.Log.e("FTP_PASTE", "Αποτυχία αποστολής για: $originalName ως $targetRemoteName")
                         }
 
                         if (cacheFile.exists()) cacheFile.delete()
