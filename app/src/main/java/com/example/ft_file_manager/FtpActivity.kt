@@ -19,6 +19,12 @@ class FtpActivity : AppCompatActivity() {
     private var currentFtpPath = "/"
     private var ftpServer: org.apache.ftpserver.FtpServer? = null
 
+    private val filePickerLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            uploadFileToFtp(uri)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityFtpBinding.inflate(layoutInflater)
@@ -59,6 +65,20 @@ class FtpActivity : AppCompatActivity() {
             }
 
             if (host.isNotEmpty()) connectToFtp(host, user, pass)
+        }
+
+        // 1. Σύνδεση κουμπιού Σάρωσης IP
+        binding.btnScanIp.setOnClickListener {
+            scanLocalNetworkForFtp { foundIp ->
+                // Αυτό καλείται αυτόματα όταν επιλέξεις μια IP από τη λίστα
+                Toast.makeText(this, "Επιλέχθηκε η IP: $foundIp", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+// 2. Σύνδεση κουμπιού Upload
+        binding.btnUpload.setOnClickListener {
+            // Ανοίγει τον file picker του κινητού για να διαλέξεις αρχείο
+            filePickerLauncher.launch("*/*")
         }
 
         // --- ΛΕΙΤΟΥΡΓΙΑ SERVER (Το δικό μου κινητό) ---
@@ -109,6 +129,10 @@ class FtpActivity : AppCompatActivity() {
                         binding.cardClient.visibility = View.GONE
                         binding.cardServer.visibility = View.GONE
                         binding.ftpRecyclerView.visibility = View.VISIBLE
+
+                        // --- ΕΔΩ ΕΜΦΑΝΙΖΕΤΑΙ ΤΟ ΚΟΥΜΠΙ UPLOAD ---
+                        binding.btnUpload.visibility = View.VISIBLE
+
                         loadFtpFiles("/")
 
                         // ΕΔΩ ΚΑΛΟΥΜΕ ΤΗΝ ΕΡΩΤΗΣΗ
@@ -123,7 +147,6 @@ class FtpActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 runOnUiThread {
                     pd.dismiss()
-                    // ΑΥΤΟ ΘΑ ΣΟΥ ΠΕΙ ΤΟ ΠΡΑΓΜΑΤΙΚΟ ΣΦΑΛΜΑ (π.χ. Connection Refused)
                     Toast.makeText(
                         this,
                         "Σφάλμα Σύνδεσης: ${e.localizedMessage}",
@@ -372,27 +395,174 @@ class FtpActivity : AppCompatActivity() {
         Toast.makeText(this, "Ο Server σταμάτησε", Toast.LENGTH_SHORT).show()
     }
 
-    // Βοηθητική συνάρτηση για την IP
+    private fun uploadFileToFtp(uri: android.net.Uri) {
+        val contentResolver = contentResolver
+        val fileName = getFileNameFromUri(uri) ?: "uploaded_file"
+
+        val progressDialog = android.app.ProgressDialog(this)
+        progressDialog.setMessage("Ανεβαίνει το αρχείο: $fileName...")
+        progressDialog.setCancelable(false)
+        progressDialog.show()
+
+        Thread {
+            var success = false
+            try {
+                ftpClient.setFileType(FTP.BINARY_FILE_TYPE)
+                val inputStream = contentResolver.openInputStream(uri)
+                if (inputStream != null) {
+                    // Ανεβάζουμε το αρχείο στον τρέχοντα φάκελο (currentFtpPath)
+                    val remotePath = if (currentFtpPath == "/") "/$fileName" else "$currentFtpPath/$fileName"
+                    success = ftpClient.storeFile(remotePath, inputStream)
+                    inputStream.close()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            runOnUiThread {
+                progressDialog.dismiss()
+                if (success) {
+                    Toast.makeText(this, "Το αρχείο ανέβηκε με επιτυχία!", Toast.LENGTH_LONG).show()
+                    // Ανανέωση λίστας φακέλου για να φανεί το νέο αρχείο
+                    loadFtpFiles(currentFtpPath)
+                } else {
+                    Toast.makeText(this, "Αποτυχία ανεβάσματος. Κωδικός: ${ftpClient.replyCode}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    // Βοηθητική συνάρτηση για να παίρνουμε το όνομα του αρχείου από το Uri
+    private fun getFileNameFromUri(uri: android.net.Uri): String? {
+        var name: String? = null
+        val cursor = contentResolver.query(uri, null, null, null, null)
+        cursor?.use {
+            if (it.moveToFirst()) {
+                val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (nameIndex != -1) {
+                    name = it.getString(nameIndex)
+                }
+            }
+        }
+        if (name == null) {
+            name = uri.path?.substringAfterLast('/')
+        }
+        return name
+    }
+
     private fun getWifiIPAddress(): String {
         try {
             val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
             while (interfaces.hasMoreElements()) {
                 val iface = interfaces.nextElement()
-                // Φιλτράρουμε τις διεπαφές (θέλουμε wlan0 για Wi-Fi)
+                android.util.Log.d("FtpScan", "Interface: ${iface.name}, Up: ${iface.isUp}, Loopback: ${iface.isLoopback}")
                 if (iface.isLoopback || !iface.isUp) continue
 
                 val addresses = iface.inetAddresses
                 while (addresses.hasMoreElements()) {
                     val addr = addresses.nextElement()
-                    // Θέλουμε μόνο IPv4 διευθύνσεις (π.χ. 192.168.x.x)
+                    android.util.Log.d("FtpScan", "  -> IP found: ${addr.hostAddress}")
                     if (addr is java.net.Inet4Address) {
-                        return addr.hostAddress
+                        val hostAddr = addr.hostAddress
+                        // Αποφυγή του localhost
+                        if (!hostAddr.startsWith("127.")) {
+                            android.util.Log.d("FtpScan", "SELECTED IP for scanning: $hostAddr")
+                            return hostAddr
+                        }
                     }
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("FtpScan", "Error getting IP: ${e.message}")
         }
         return "Μη διαθέσιμη"
+    }
+
+    private fun scanLocalNetworkForFtp(onIpFound: (String) -> Unit) {
+        val myIp = getWifiIPAddress()
+        android.util.Log.d("FtpScan", "=== ΕΝΑΡΞΗ ΠΛΗΡΟΥΣ ΣΑΡΩΣΗΣ LAN ===")
+        android.util.Log.d("FtpScan", "Η IP μου: $myIp")
+
+        if (myIp == "Μη διαθέσιμη" || myIp.isEmpty()) {
+            Toast.makeText(this, "Δεν βρέθηκε ενεργή IP δικτύου", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val progressDialog = android.app.ProgressDialog(this)
+        progressDialog.setMessage("Σάρωση όλων των συσκευών στο δίκτυο...")
+        progressDialog.setCancelable(false)
+        progressDialog.show()
+
+        Thread {
+            val foundIps = mutableListOf<String>()
+            val executor = java.util.concurrent.Executors.newFixedThreadPool(40)
+
+            // Δυναμικός εντοπισμός υποδικτύων προς σάρωση:
+            // 1. Το δικό μας υποδίκτυο (π.χ. 192.168.10.)
+            val mySubnet = myIp.substringBeforeLast(".")
+
+            // 2. Το κλασικό υποδίκτυο του router αν είμαστε σε extender (192.168.1. και 192.168.0.)
+            val subnetsToScan = mutableSetOf(mySubnet)
+            if (mySubnet.startsWith("192.168.")) {
+                subnetsToScan.add("192.168.1")
+                subnetsToScan.add("192.168.0")
+            }
+
+            android.util.Log.d("FtpScan", "Υποδίκτυα προς σάρωση: $subnetsToScan")
+
+            for (subnet in subnetsToScan) {
+                for (i in 1..254) {
+                    val targetIp = "$subnet.$i"
+                    if (targetIp == myIp) continue
+
+                    executor.submit {
+                        // Ελέγχουμε τις standard θύρες FTP αλλά και άλλες γνωστές θύρες server
+                        val portsToCheck = listOf(21, 2121, 8080, 22)
+                        for (port in portsToCheck) {
+                            try {
+                                val socket = java.net.Socket()
+                                // Μικρό timeout 250ms για να σκανάρει γρήγορα και τα 254x2 IPs
+                                socket.connect(java.net.InetSocketAddress(targetIp, port), 250)
+                                socket.close()
+
+                                val serverAddress = if (port == 21) targetIp else "$targetIp:$port"
+                                android.util.Log.d("FtpScan", ">>> ΒΡΕΘΗΚΕ ΣΥΣΚΕΥΗ/SERVER στο: $serverAddress")
+
+                                synchronized(foundIps) {
+                                    if (!foundIps.contains(serverAddress)) {
+                                        foundIps.add(serverAddress)
+                                    }
+                                }
+                                break
+                            } catch (e: Exception) {
+                                // Δεν υπάρχει ανοιχτή πόρτα εδώ
+                            }
+                        }
+                    }
+                }
+            }
+
+            executor.shutdown()
+            executor.awaitTermination(15, java.util.concurrent.TimeUnit.SECONDS)
+
+            runOnUiThread {
+                progressDialog.dismiss()
+                if (foundIps.isNotEmpty()) {
+                    val items = foundIps.toTypedArray()
+                    AlertDialog.Builder(this)
+                        .setTitle("Βρέθηκαν Servers / Συσκευές")
+                        .setItems(items) { _, which ->
+                            val selectedFullAddress = items[which]
+                            val ipOnly = selectedFullAddress.substringBefore(":")
+                            binding.etHost.setText(ipOnly)
+                            onIpFound(selectedFullAddress)
+                        }
+                        .setNegativeButton("Άκυρο", null)
+                        .show()
+                } else {
+                    Toast.makeText(this, "Δεν βρέθηκαν συσκευές. Ελέγξτε αν είναι ενεργό το AP Isolation στο Extender.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
     }
 }

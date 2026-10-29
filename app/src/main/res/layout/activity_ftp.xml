@@ -37,14 +37,33 @@
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
-                <EditText
-                    android:id="@+id/etHost"
+                <!-- ΤΡΟΠΟΠΟΙΗΣΗ ΕΔΩ: Βάλαμε Horizontal LinearLayout για να μπει το κουμπί σάρωσης δίπλα στο Host -->
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:drawableStart="@android:drawable/ic_menu_share"
-                    android:drawablePadding="8dp"
-                    android:hint="Host (π.χ. 192.168.1.5)"
-                    android:inputType="textUri" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <EditText
+                        android:id="@+id/etHost"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:drawableStart="@android:drawable/ic_menu_share"
+                        android:drawablePadding="8dp"
+                        android:hint="Host (π.χ. 192.168.1.5)"
+                        android:inputType="textUri" />
+
+                    <Button
+                        android:id="@+id/btnScanIp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:text="Scan"
+                        android:backgroundTint="#0091EA"
+                        app:cornerRadius="8dp" />
+                </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -149,11 +168,23 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- ΚΟΥΜΠΙ UPLOAD: Θα φαίνεται μόνο όταν μπεις στον FTP -->
+        <Button
+            android:id="@+id/btnUpload"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="#FF9800"
+            android:text="➕ Ανέβασμα Αρχείου στον Server"
+            android:textColor="#FFFFFF"
+            android:visibility="gone"
+            app:cornerRadius="8dp" />
+
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/ftpRecyclerView"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="8dp"
             android:background="#371A61"
             android:visibility="gone" />
 
