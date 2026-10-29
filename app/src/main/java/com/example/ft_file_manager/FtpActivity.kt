@@ -277,6 +277,7 @@ class FtpActivity : AppCompatActivity() {
                 runOnUiThread {
                     // --- ΚΑΛΟΥΜΕ ΚΑΙ ΕΔΩ ΓΙΑ ΝΑ ΜΗΝ ΧΑΝΕΤΑΙ ΤΟ ΚΟΥΜΠΙ ΣΕ ΦΑΚΕΛΟΥΣ ---
                     updatePasteButtonVisibility()
+
                     binding.ftpRecyclerView.adapter = FileAdapter(
                         files = fileList,
                         isInSelectionMode = false,
@@ -297,8 +298,13 @@ class FtpActivity : AppCompatActivity() {
                                     .show()
                             }
                         },
-                        onItemLongClick = { /* ... */ },
-                        onSelectionChanged = { /* ... */ }
+                        onItemLongClick = { selectedFile ->
+                            // === ΕΔΩ ΜΠΑΙΝΕΙ ΤΟ LONG CLICK ΠΟΥ ΑΝΟΙΓΕΙ ΤΟ ΜΕΝΟΥ ===
+                            showFtpFileOptions(selectedFile)
+                        },
+                        onSelectionChanged = {
+                            // Τυχόν κώδικας για πολλαπλή επιλογή αν χρειαστεί
+                        }
                     )
                 }
             } catch (e: Exception) {
@@ -368,6 +374,138 @@ class FtpActivity : AppCompatActivity() {
                 }
             }
         }.start()
+    }
+
+    // Κάλεσέ το αυτό στο setOnItemLongClickListener της λίστας σου (π.χ. ListView ή RecyclerView adapter)
+    fun showFtpFileOptions(fileModel: FileModel) {
+        if (fileModel.isRoot || fileModel.name == "..") return
+
+        val options = if (fileModel.isDirectory) {
+            arrayOf("Μετονομασία", "Διαγραφή")
+        } else {
+            arrayOf("Λήψη αρχείου", "Μετονομασία", "Διαγραφή", "Αποκοπή")
+        }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle(fileModel.name)
+            .setItems(options) { _, which ->
+                if (fileModel.isDirectory) {
+                    when (which) {
+                        0 -> showRenameDialog(fileModel.path, fileModel.name)
+                        1 -> confirmAndDelete(fileModel.path, fileModel.name)
+                    }
+                } else {
+                    when (which) {
+                        0 -> downloadFileWithProgress(fileModel.path, fileModel.name)
+                        1 -> showRenameDialog(fileModel.path, fileModel.name)
+                        2 -> confirmAndDelete(fileModel.path, fileModel.name)
+                        3 -> prepareCut(fileModel) // <-- Τώρα περνάει σωστά ολόκληρο το FileModel!
+                    }
+                }
+            }
+            .show()
+    }
+
+    // --- ΜΕΤΟΝΟΜΑΣΙΑ ---
+    private fun showRenameDialog(remoteFilePath: String, oldName: String) {
+        val input = android.widget.EditText(this).apply {
+            setText(oldName)
+            setSelection(oldName.length)
+        }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Μετονομασία αρχείου")
+            .setView(input)
+            .setPositiveButton("OK") { _, _ ->
+                val newName = input.text.toString().trim()
+                if (newName.isNotEmpty() && newName != oldName) {
+                    // Υπολογισμός νέου path διατηρώντας το ίδιο directory
+                    val parentDir = remoteFilePath.substringBeforeLast('/', "")
+                    val newRemotePath = if (parentDir.isEmpty()) "/$newName" else "$parentDir/$newName"
+
+                    executeFtpRename(remoteFilePath, newRemotePath, newName)
+                }
+            }
+            .setNegativeButton("Άκυρο", null)
+            .show()
+    }
+
+    private fun executeFtpRename(oldPath: String, newPath: String, newName: String) {
+        val progressDialog = android.app.ProgressDialog(this).apply {
+            setMessage("Μετονομασία σε $newName...")
+            setCancelable(false)
+            show()
+        }
+
+        Thread {
+            var success = false
+            try {
+                success = ftpClient.rename(oldPath, newPath)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            runOnUiThread {
+                progressDialog.dismiss()
+                if (success) {
+                    Toast.makeText(this, "Μετονομάστηκε επιτυχώς!", Toast.LENGTH_SHORT).show()
+                    loadFtpFiles(currentFtpPath) // Ανανέωση λίστας αρχείων
+                } else {
+                    Toast.makeText(this, "Αποτυχία μετονομασίας. Server Code: ${ftpClient.replyCode}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    // --- ΔΙΑΓΡΑΦΗ ---
+    private fun confirmAndDelete(remoteFilePath: String, fileName: String) {
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Διαγραφή αρχείου")
+            .setMessage("Θέλετε σίγουρα να διαγράψετε το αρχείο $fileName;")
+            .setPositiveButton("Ναι") { _, _ ->
+                executeFtpDelete(remoteFilePath, fileName)
+            }
+            .setNegativeButton("Άκυρο", null)
+            .show()
+    }
+
+    private fun executeFtpDelete(remoteFilePath: String, fileName: String) {
+        val progressDialog = android.app.ProgressDialog(this).apply {
+            setMessage("Διαγραφή: $fileName...")
+            setCancelable(false)
+            show()
+        }
+
+        Thread {
+            var success = false
+            try {
+                success = ftpClient.deleteFile(remoteFilePath)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            runOnUiThread {
+                progressDialog.dismiss()
+                if (success) {
+                    Toast.makeText(this, "Το αρχείο διαγράφηκε!", Toast.LENGTH_SHORT).show()
+                    loadFtpFiles(currentFtpPath) // Ανανέωση λίστας
+                } else {
+                    Toast.makeText(this, "Αποτυχία διαγραφής. Server Code: ${ftpClient.replyCode}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
+    // --- ΑΠΟΚΟΠΗ (Cut) ---
+    private fun prepareCut(fileModel: FileModel) {
+        TransferManager.filesToMove = listOf(fileModel)
+        TransferManager.isCut = true
+
+        Toast.makeText(this, "Επιλέχθηκε για αποκοπή: ${fileModel.name}", Toast.LENGTH_SHORT).show()
+
+        if (TransferManager.filesToMove.isNotEmpty()) {
+            binding.btnUpload.visibility = View.VISIBLE
+        }
     }
 
     private fun askToSaveFavorite(host: String) {
