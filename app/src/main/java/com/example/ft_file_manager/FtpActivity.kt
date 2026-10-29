@@ -137,42 +137,48 @@ class FtpActivity : AppCompatActivity() {
     private fun loadFtpFiles(path: String) {
         Thread {
             try {
-                ftpClient.changeWorkingDirectory(path)
-                currentFtpPath = path
-
-                // 1. Έλεγχος αν τα αρχεία είναι null
-                val ftpFiles = ftpClient.listFiles()
-                if (ftpFiles == null) {
+                // Διορθωμένο path handling για το FTP
+                val success = ftpClient.changeWorkingDirectory(path)
+                if (!success) {
                     runOnUiThread {
-                        Toast.makeText(
-                            this,
-                            "Αδυναμία ανάγνωσης φακέλου",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        Toast.makeText(this, "Αδυναμία αλλαγής φακέλου", Toast.LENGTH_SHORT).show()
                     }
                     return@Thread
                 }
+                currentFtpPath = ftpClient.printWorkingDirectory() ?: path
 
+                // Παίρνουμε τη λίστα των αρχείων
+                val ftpFiles = ftpClient.listFiles()
                 val fileList = mutableListOf<FileModel>()
-                ftpFiles.forEach { file ->
-                    if (file.name != "." && file.name != "..") {
-                        fileList.add(
-                            FileModel(
-                                name = file.name,
-                                path = if (path == "/") "/${file.name}" else "$path/${file.name}",
-                                isDirectory = file.isDirectory,
-                                size = if (file.isDirectory) "Φάκελος" else "${file.size / 1024} KB",
-                                isRoot = false
-                            )
-                        )
-                    }
-                }
 
-                // 2. Έλεγχος αν η λίστα είναι άδεια
-                if (fileList.isEmpty()) {
-                    runOnUiThread {
-                        Toast.makeText(this, "Ο φάκελος είναι άδειος", Toast.LENGTH_SHORT).show()
-                        // Ακόμα και αν είναι άδειος, πρέπει να βάλουμε τον adapter για να καθαρίσει η οθόνη
+                if (ftpFiles != null) {
+                    for (file in ftpFiles) {
+                        // Πάρε το όνομα (αν είναι κενό, δοκίμασε το rawString)
+                        val fileName = file.name ?: file.rawListing?.substringAfterLast(" ") ?: continue
+
+                        if (fileName != "." && fileName != "..") {
+                            val isDir = file.isDirectory
+
+                            // Υπολογισμός μεγέθους
+                            val sizeStr = if (isDir) {
+                                "--"
+                            } else {
+                                val kb = file.size / 1024
+                                if (kb < 1) "< 1 KB" else "$kb KB"
+                            }
+
+                            val fullPath = if (currentFtpPath == "/") "/$fileName" else "$currentFtpPath/$fileName"
+
+                            fileList.add(
+                                FileModel(
+                                    name = fileName,
+                                    path = fullPath,
+                                    isDirectory = isDir,
+                                    size = sizeStr,
+                                    isRoot = false
+                                )
+                            )
+                        }
                     }
                 }
 
@@ -182,7 +188,6 @@ class FtpActivity : AppCompatActivity() {
                     binding.ftpRecyclerView.adapter = FileAdapter(
                         files = fileList,
                         isInSelectionMode = false,
-                        // Μέσα στην runOnUiThread της loadFtpFiles
                         onItemClick = { selectedFile ->
                             if (selectedFile.isDirectory) {
                                 loadFtpFiles(selectedFile.path)
@@ -191,7 +196,6 @@ class FtpActivity : AppCompatActivity() {
                                     .setTitle("Λήψη αρχείου")
                                     .setMessage("Θέλετε να κατεβάσετε το ${selectedFile.name};")
                                     .setPositiveButton("Ναι") { _, _ ->
-                                        // ΠΡΟΣΟΧΗ: Κάλεσε τη συνάρτηση με το Progress!
                                         downloadFileWithProgress(
                                             selectedFile.path,
                                             selectedFile.name
