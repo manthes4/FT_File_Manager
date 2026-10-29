@@ -145,12 +145,29 @@ class FtpActivity : AppCompatActivity() {
 
         Thread {
             try {
+                // --- ΕΝΕΡΓΟΠΟΙΗΣΗ UTF-8 ΓΙΑ ΑΣΦΑΛΗ ΟΝΟΜΑΤΑ (Underscores, Ελληνικά κλπ) ---
+                val config = org.apache.commons.net.ftp.FTPClientConfig(
+                    org.apache.commons.net.ftp.FTPClientConfig.SYST_UNIX
+                )
+                config.serverLanguageCode = "en" // ή "el" αν ο server είναι ελληνικός
+                ftpClient.configure(config)
+                ftpClient.controlEncoding = "UTF-8"
+                ftpClient.autodetectUTF8 = true
                 ftpClient.connect(host, 21)
+
+
                 val loginSuccess = ftpClient.login(user, pass)
 
                 if (loginSuccess) {
                     ftpClient.enterLocalPassiveMode()
                     ftpClient.setFileType(FTP.BINARY_FILE_TYPE)
+
+                    // Στέλνουμε ρητά εντολή στον FTP Server να επιτρέψει UTF-8 χαρακτήρες
+                    try {
+                        ftpClient.sendCommand("OPTS UTF8", "ON")
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
 
                     runOnUiThread {
                         pd.dismiss()
@@ -503,31 +520,81 @@ class FtpActivity : AppCompatActivity() {
     }
 
     private fun executeFtpPaste() {
-        val progressDialog = android.app.ProgressDialog(this)
-        progressDialog.setMessage("Μεταφορά αρχείων στον FTP...")
-        progressDialog.setCancelable(false)
-        progressDialog.show()
+        val progressDialog = android.app.ProgressDialog(this).apply {
+            setMessage("Μεταφορά αρχείων στον FTP...")
+            setCancelable(false)
+            show()
+        }
 
         Thread {
             var allSuccess = true
             try {
+                ftpClient.controlEncoding = "UTF-8"
                 ftpClient.setFileType(org.apache.commons.net.ftp.FTP.BINARY_FILE_TYPE)
+                ftpClient.enterLocalPassiveMode()
+
+                // Παίρνουμε τη λίστα των αρχείων του τρέχοντος φακέλου για τον έλεγχο διπλότυπων
+                val existingFiles = ftpClient.listFiles().map { it.name }.toSet()
 
                 TransferManager.filesToMove.forEach { model ->
                     val localFile = java.io.File(model.path)
                     if (localFile.exists()) {
-                        val remotePath = if (currentFtpPath == "/") "/${localFile.name}" else "$currentFtpPath/${localFile.name}"
+                        val originalName = localFile.name
+                        val targetDir = if (currentFtpPath.endsWith("/")) currentFtpPath else "$currentFtpPath/"
 
-                        val inputStream = java.io.FileInputStream(localFile)
-                        val success = ftpClient.storeFile(remotePath, inputStream)
-                        inputStream.close()
+                        val cacheFile = java.io.File(cacheDir, "ftp_temp_$originalName")
+                        localFile.copyTo(cacheFile, overwrite = true)
 
-                        if (!success) {
+                        var uploadSuccess = false
+                        var targetRemoteName = originalName
+
+                        // --- 1. Δοκιμή με το αυθεντικό όνομα ---
+                        var primaryRemotePath = if (targetDir == "/") "/$targetRemoteName" else "$targetDir$targetRemoteName"
+
+                        java.io.FileInputStream(cacheFile).use { inputStream ->
+                            uploadSuccess = ftpClient.storeFile(primaryRemotePath, inputStream)
+                        }
+
+                        // --- 2. Fallback αν αποτύχει (αφαίρεση underscore/ειδικών χαρακτήρων) ---
+                        if (!uploadSuccess) {
+                            val extension = originalName.substringAfterLast('.', "")
+                            val nameWithoutExt = originalName.substringBeforeLast('.')
+                            val cleanBaseName = nameWithoutExt.substringBefore("_")
+
+                            targetRemoteName = if (extension.isNotEmpty()) "$cleanBaseName.$extension" else cleanBaseName
+
+                            // --- 3. Έλεγχος σύγκρουσης ΧΩΡΙΣ κανέναν ειδικό χαρακτήρα (π.χ. 63584331.jpg, 63584332.jpg) ---
+                            var counter = 1
+                            val baseWithoutExt = targetRemoteName.substringBeforeLast('.')
+                            val fileExt = targetRemoteName.substringAfterLast('.', "")
+
+                            // Όταν υπάρχει ήδη το αρχείο, προσθέτουμε τον αριθμό κολλητά (χωρίς underscores ή παρενθέσεις)
+                            while (existingFiles.contains(targetRemoteName)) {
+                                targetRemoteName = if (fileExt.isNotEmpty()) {
+                                    "$baseWithoutExt$counter.$fileExt"
+                                } else {
+                                    "$baseWithoutExt$counter"
+                                }
+                                counter++
+                            }
+
+                            val fallbackRemotePath = if (targetDir == "/") "/$targetRemoteName" else "$targetDir$targetRemoteName"
+
+                            android.util.Log.w("FTP_PASTE", "1η απέτυχε. Ασφαλές όνομα χωρίς ειδικούς χαρακτήρες: $targetRemoteName")
+
+                            java.io.FileInputStream(cacheFile).use { inputStream ->
+                                uploadSuccess = ftpClient.storeFile(fallbackRemotePath, inputStream)
+                            }
+                        }
+
+                        if (!uploadSuccess) {
                             allSuccess = false
+                            android.util.Log.e("FTP_PASTE", "Οριστική αποτυχία για: $originalName")
                         } else if (TransferManager.isCut) {
-                            // Αν ήταν Cut (Αποκοπή), διαγράφουμε το τοπικό αρχείο
                             localFile.delete()
                         }
+
+                        if (cacheFile.exists()) cacheFile.delete()
                     }
                 }
             } catch (e: Exception) {
@@ -538,13 +605,13 @@ class FtpActivity : AppCompatActivity() {
             runOnUiThread {
                 progressDialog.dismiss()
                 if (allSuccess) {
-                    Toast.makeText(this, "Η επικόλληση στον FTP ολοκληρώθηκε!", Toast.LENGTH_SHORT).show()
-                    // Καθαρισμός της μνήμης μεταφοράς
+                    Toast.makeText(this, "Η επικόλληση ολοκληρώθηκε επιτυχώς!", Toast.LENGTH_SHORT).show()
                     TransferManager.filesToMove = emptyList()
-                    // Ανανέωση λίστας FTP
+                    updatePasteButtonVisibility()
                     loadFtpFiles(currentFtpPath)
                 } else {
-                    Toast.makeText(this, "Κάποια αρχεία απέτυχαν κατά την επικόλληση", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Κάποια αρχεία απέτυχαν τελικά", Toast.LENGTH_LONG).show()
+                    loadFtpFiles(currentFtpPath)
                 }
             }
         }.start()
@@ -558,6 +625,8 @@ class FtpActivity : AppCompatActivity() {
 
         Thread {
             try {
+                ftpClient.controlEncoding = "UTF-8"
+                ftpClient.autodetectUTF8 = true
                 ftpClient.connect(host, 21)
                 val loginSuccess = ftpClient.login(user, pass)
 
