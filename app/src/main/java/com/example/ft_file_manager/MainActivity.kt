@@ -539,25 +539,24 @@ class MainActivity : AppCompatActivity() {
                     for (file in files) {
                         val cachedSize = sizeCache[file.absolutePath]
                         val lastModValue = file.lastModified()
+                        val isDir = file.isDirectory
 
                         tempArrayList.add(
                             FileModel(
                                 name = file.name,
                                 path = file.absolutePath,
-                                isDirectory = file.isDirectory,
-                                size = cachedSize
-                                    ?: if (file.isDirectory) "--" else FolderCalculator.formatSize(
-                                        file.length()
-                                    ),
+                                isDirectory = isDir,
+                                // Lazy Loading: Αν είναι φάκελος "--", αλλιώς "..." για να ανοίγει αμέσως
+                                size = cachedSize ?: if (isDir) "--" else "...",
                                 isSelected = false,
-                                lastModifiedCached = lastModValue // <--- Πρόσεξε το κόμμα στην προηγούμενη γραμμή!
+                                lastModifiedCached = lastModValue
                             )
                         )
                     }
                 } else {
-                    // ROOT / BYPASS MODE
+                    // ROOT / BYPASS MODE (ΔΙΟΡΘΩΣΗ: Αφαιρέθηκε το -N που προκαλούσε σφάλμα)
                     val cmd =
-                        "export LANG=en_US.UTF-8; ls -p -N --color=never \"${directory.absolutePath}\""
+                        "export LANG=en_US.UTF-8; ls -p --color=never \"${directory.absolutePath}\""
                     val output = RootTools.getOutput(cmd)
                     if (output.isNotEmpty() && !output.contains("Error:")) {
                         output.split("\n").forEach { line ->
@@ -573,7 +572,7 @@ class MainActivity : AppCompatActivity() {
                                         cleanName,
                                         fullPath,
                                         isDir,
-                                        cachedSize ?: if (isDir) "--" else "System File",
+                                        cachedSize ?: if (isDir) "--" else "...",
                                         false
                                     )
                                 )
@@ -591,7 +590,6 @@ class MainActivity : AppCompatActivity() {
             fullFileList = fileList
             updateAdapter(fileList)
 
-            // ΠΡΟΣΘΕΣΕ ΑΥΤΟ ΕΔΩ:
             if (isAndroidTV()) {
                 binding.recyclerView.post {
                     // Αν η λίστα δεν είναι άδεια, δώσε το focus στο πρώτο στοιχείο
